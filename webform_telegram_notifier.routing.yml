@@ -1,7 +1,0 @@
-webform_telegram_notifier.settings:
-  path: '/admin/config/system/telegram-notify'
-  defaults:
-    _form: 'Drupal\webform_telegram_notifier\Form\SettingsForm'
-    _title: 'Telegram-уведомления о заявках'
-  requirements:
-    _permission: 'administer webform telegram notifier'

@@ -2,32 +2,26 @@
 
 /**
  * @file
- * Страница настроек Telegram-уведомлений о заявках.
+ * Страница настроек Telegram-уведомлений (заказы Commerce и заявки Webform).
  */
 
 declare(strict_types=1);
 
-namespace Drupal\webform_telegram_notifier\Form;
+namespace Drupal\commerce_to_telegram\Form;
 
+use Drupal\commerce_to_telegram\Service\TelegramSender;
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Utility\Token;
-use Drupal\webform_telegram_notifier\Service\TelegramSender;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
- * Настройки модуля Webform Telegram Notifier.
+ * Настройки модуля Commerce to Telegram.
  */
 class SettingsForm extends ConfigFormBase {
 
-  const SETTINGS = 'webform_telegram_notifier.settings';
-
-  /**
-   * Хранилище сущностей (для списка форм Webform).
-   */
-  protected EntityTypeManagerInterface $entityTypeManager;
+  const SETTINGS = 'commerce_to_telegram.settings';
 
   /**
    * Сервис отправки в Telegram.
@@ -47,8 +41,7 @@ class SettingsForm extends ConfigFormBase {
       $container->get('config.factory'),
       $container->has('typed_config_manager') ? $container->get('typed_config_manager') : NULL
     );
-    $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->sender = $container->get('webform_telegram_notifier.sender');
+    $instance->sender = $container->get('commerce_to_telegram.sender');
     $instance->token = $container->get('token');
     return $instance;
   }
@@ -69,7 +62,7 @@ class SettingsForm extends ConfigFormBase {
    * {@inheritdoc}
    */
   public function getFormId(): string {
-    return 'webform_telegram_notifier_settings';
+    return 'commerce_to_telegram_settings';
   }
 
   /**
@@ -121,61 +114,97 @@ class SettingsForm extends ConfigFormBase {
         'plain' => $this->t('Простой текст'),
       ],
       '#default_value' => $config->get('parse_mode') ?: 'html',
-      '#description' => $this->t('Для HTML поддерживаются теги: <b>, <i>, <u>, <s>, <a href="…">, <code>, <pre>. Если разметка окажется некорректной, модуль автоматически повторит отправку простым текстом, чтобы заявка не потерялась.'),
+      '#description' => $this->t('Для HTML поддерживаются теги: <b>, <i>, <u>, <s>, <a href="…">, <code>, <pre>. Если разметка окажется некорректной, модуль автоматически повторит отправку простым текстом, чтобы уведомление не потерялось.'),
     ];
 
-    // --- Формы для отправки ------------------------------------------------
-    $form['forms_section'] = [
+    // --- Заказы Drupal Commerce ----------------------------------------------
+    $form['commerce'] = [
       '#type' => 'details',
-      '#title' => $this->t('Формы для отправки'),
+      '#title' => $this->t('Заказы Drupal Commerce'),
       '#open' => TRUE,
-      '#description' => $this->t('Отметьте формы Webform, новые заявки которых будут доставляться в Telegram.'),
     ];
 
-    $webforms = $this->entityTypeManager->getStorage('webform')->loadMultiple();
-    uasort($webforms, static function ($a, $b) {
-      return strcmp((string) $a->label(), (string) $b->label());
-    });
+    if (\Drupal::moduleHandler()->moduleExists('commerce_order')) {
+      $form['commerce']['commerce_enabled'] = [
+        '#type' => 'checkbox',
+        '#title' => $this->t('Отправлять новые заказы в Telegram'),
+        '#default_value' => (bool) $config->get('commerce.enabled'),
+        '#description' => $this->t('Уведомление отправляется в момент размещения заказа (переход в статус «Завершён» при оформлении).'),
+      ];
 
-    $options = [];
-    foreach ($webforms as $webform) {
-      $options[$webform->id()] = $webform->label() . ' [' . $webform->id() . ']';
-    }
+      $form['commerce']['commerce_message'] = [
+        '#type' => 'textarea',
+        '#title' => $this->t('Шаблон сообщения о заказе'),
+        '#default_value' => $config->get('commerce.message'),
+        '#rows' => 10,
+        '#description' => $this->t('Токены заказа: [commerce_order:order_number], [commerce_order:total_price], [commerce_order:mail], [commerce_order:state]. Дополнительные токены модуля: [commerce_order:items_table] (все позиции заказа), [commerce_order:billing_address], [commerce_order:shipping_address].'),
+      ];
 
-    if ($options !== []) {
-      $form['forms_section']['enabled_webforms'] = [
-        '#type' => 'checkboxes',
-        '#title' => $this->t('Включённые формы'),
-        '#options' => $options,
-        '#default_value' => (array) $config->get('enabled_webforms'),
+      $form['commerce']['commerce_token_help'] = [
+        '#theme' => 'token_tree_link',
+        '#token_types' => ['commerce_order', 'site', 'user', 'current-user', 'current-date'],
       ];
     }
     else {
-      $form['forms_section']['no_webforms'] = [
-        '#markup' => '<p>' . $this->t('Формы Webform не найдены. Создайте форму в разделе «Структура → Формы Webform».') . '</p>',
+      $form['commerce']['commerce_missing'] = [
+        '#markup' => '<p>' . $this->t('Модуль Drupal Commerce не установлен — интеграция с заказами недоступна. Раздел появится автоматически после установки Drupal Commerce.') . '</p>',
       ];
     }
 
-    // --- Шаблон сообщения --------------------------------------------------
-    $form['message_section'] = [
+    // --- Формы Webform --------------------------------------------------------
+    $form['webform_section'] = [
       '#type' => 'details',
-      '#title' => $this->t('Шаблон сообщения'),
-      '#open' => TRUE,
+      '#title' => $this->t('Формы Webform (опционально)'),
+      '#open' => FALSE,
     ];
 
-    $form['message_section']['message_template'] = [
-      '#type' => 'textarea',
-      '#title' => $this->t('Текст сообщения'),
-      '#default_value' => $config->get('message'),
-      '#rows' => 10,
-      '#required' => TRUE,
-      '#description' => $this->t('Используйте токены. Значения полей подставляются по ключу элемента: [webform_submission:values:КЛЮЧ] — машинное имя элемента смотрите на вкладке «Элементы» нужной формы. Токен [webform_submission:values] без ключа подставит все заполненные поля заявки.'),
-    ];
+    if (\Drupal::moduleHandler()->moduleExists('webform')) {
+      $form['webform_section']['webform_hint'] = [
+        '#markup' => '<p>' . $this->t('Отметьте формы Webform, новые заявки которых будут доставляться в Telegram.') . '</p>',
+      ];
 
-    $form['message_section']['token_help'] = [
-      '#theme' => 'token_tree_link',
-      '#token_types' => ['webform_submission', 'webform', 'site', 'user', 'current-user', 'current-date'],
-    ];
+      $webforms = \Drupal::entityTypeManager()->getStorage('webform')->loadMultiple();
+      uasort($webforms, static function ($a, $b) {
+        return strcmp((string) $a->label(), (string) $b->label());
+      });
+
+      $options = [];
+      foreach ($webforms as $webform) {
+        $options[$webform->id()] = $webform->label() . ' [' . $webform->id() . ']';
+      }
+
+      if ($options !== []) {
+        $form['webform_section']['enabled_webforms'] = [
+          '#type' => 'checkboxes',
+          '#title' => $this->t('Включённые формы'),
+          '#options' => $options,
+          '#default_value' => (array) $config->get('webform.enabled_forms'),
+        ];
+      }
+      else {
+        $form['webform_section']['no_webforms'] = [
+          '#markup' => '<p>' . $this->t('Формы Webform не найдены. Создайте форму в разделе «Структура → Формы Webform».') . '</p>',
+        ];
+      }
+
+      $form['webform_section']['webform_message'] = [
+        '#type' => 'textarea',
+        '#title' => $this->t('Шаблон сообщения о заявке'),
+        '#default_value' => $config->get('webform.message'),
+        '#rows' => 10,
+        '#description' => $this->t('Значения полей подставляются по ключу элемента: [webform_submission:values:КЛЮЧ]. Токен [webform_submission:values] без ключа подставит все заполненные поля заявки.'),
+      ];
+
+      $form['webform_section']['webform_token_help'] = [
+        '#theme' => 'token_tree_link',
+        '#token_types' => ['webform_submission', 'webform', 'site', 'user', 'current-user', 'current-date'],
+      ];
+    }
+    else {
+      $form['webform_section']['webform_missing'] = [
+        '#markup' => '<p>' . $this->t('Модуль Webform не установлен — интеграция с формами недоступна.') . '</p>',
+      ];
+    }
 
     // --- Кнопка тестовой отправки -------------------------------------------
     $form['actions']['#type'] = 'actions';
@@ -209,7 +238,7 @@ class SettingsForm extends ConfigFormBase {
       return;
     }
 
-    $text = "<b>Тестовое сообщение</b>\nСайт: [site:name]\nМодуль: Webform Telegram Notifier.\n\nБот и чат настроены правильно — заявки будут доставляться сюда.";
+    $text = "<b>Тестовое сообщение</b>\nСайт: [site:name]\nМодуль: Commerce to Telegram.\n\nБот и чат настроены правильно — уведомления будут доставляться сюда.";
     $text = $this->token->replace($text, [], ['clear' => TRUE]);
 
     $result = $this->sender->send($bot_token, $chat_id, $text, $parse_mode);
@@ -226,8 +255,29 @@ class SettingsForm extends ConfigFormBase {
   /**
    * {@inheritdoc}
    */
+  public function validateForm(array &$form, FormStateInterface $form_state): void {
+    $values = $form_state->getValues();
+    $commerce_enabled = (bool) ($values['commerce']['commerce_enabled'] ?? FALSE);
+    $commerce_message = trim((string) ($values['commerce']['commerce_message'] ?? ''));
+    if ($commerce_enabled && $commerce_message === '') {
+      $form_state->setErrorByName('commerce][commerce_message', $this->t('Шаблон сообщения о заказе не может быть пустым при включённой отправке.'));
+    }
+
+    $enabled_webforms = array_filter((array) ($values['webform_section']['enabled_webforms'] ?? []));
+    $webform_message = trim((string) ($values['webform_section']['webform_message'] ?? ''));
+    if ($enabled_webforms !== [] && $webform_message === '') {
+      $form_state->setErrorByName('webform_section][webform_message', $this->t('Шаблон сообщения о заявке не может быть пустым при включённых формах.'));
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
     $telegram = (array) $form_state->getValue('telegram');
+    $commerce = (array) $form_state->getValue('commerce');
+    $webform_section = (array) $form_state->getValue('webform_section');
+
     $stored_token = trim((string) $this->config(self::SETTINGS)->get('bot_token'));
     $bot_token = trim((string) ($telegram['bot_token'] ?? ''));
 
@@ -235,8 +285,10 @@ class SettingsForm extends ConfigFormBase {
       ->set('bot_token', $bot_token !== '' ? $bot_token : $stored_token)
       ->set('chat_id', trim((string) ($telegram['chat_id'] ?? '')))
       ->set('parse_mode', (string) ($telegram['parse_mode'] ?? 'html'))
-      ->set('enabled_webforms', array_values(array_filter((array) $form_state->getValue(['forms_section', 'enabled_webforms']))))
-      ->set('message', (string) $form_state->getValue(['message_section', 'message_template']))
+      ->set('commerce.enabled', (bool) ($commerce['commerce_enabled'] ?? FALSE))
+      ->set('commerce.message', (string) ($commerce['commerce_message'] ?? ''))
+      ->set('webform.enabled_forms', array_values(array_filter((array) ($webform_section['enabled_webforms'] ?? []))))
+      ->set('webform.message', (string) ($webform_section['webform_message'] ?? ''))
       ->save();
 
     $this->messenger()->addStatus($this->t('Настройки Telegram-уведомлений сохранены.'));

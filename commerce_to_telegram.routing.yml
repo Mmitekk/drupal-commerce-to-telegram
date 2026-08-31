@@ -1,0 +1,7 @@
+commerce_to_telegram.settings:
+  path: '/admin/config/system/commerce-to-telegram'
+  defaults:
+    _form: 'Drupal\commerce_to_telegram\Form\SettingsForm'
+    _title: 'Telegram-уведомления: заказы и заявки'
+  requirements:
+    _permission: 'administer commerce to telegram'

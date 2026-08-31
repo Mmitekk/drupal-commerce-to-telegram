@@ -1,7 +1,7 @@
-# Webform Telegram Notifier
+# Commerce to Telegram
 
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
-[![Webform](https://img.shields.io/badge/Webform-6.x-0678BE)](https://www.drupal.org/project/webform)
+[![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
 [![Release](https://img.shields.io/badge/Release-v1.0.0-brightgreen)](../../releases)
 
@@ -9,41 +9,57 @@
 
 ---
 
-Модуль для Drupal 10/11, который **автоматически отправляет новые заявки
-Webform в Telegram** — в группу или канал, в которой(ом) присутствует ваш бот.
+Модуль для Drupal 10/11, который **автоматически отправляет в Telegram новые
+заказы Drupal Commerce** — в группу или канал, в которой(ом) присутствует ваш
+бот. Дополнительно (опционально) умеет отправлять заявки из форм Webform.
 
-Каждая оформленная заявка с сайта мгновенно попадает в телеграм-группу
-менеджеров: не нужно проверять почту или админку — новые заказы, звонки и
-обратные связи видны сразу после отправки формы.
+Каждый оформленный заказ мгновенно появляется в телеграм-группе менеджеров:
+номер заказа, состав (позиции и суммы), покупатель, адрес и итог. Не нужно
+проверять почту и админку — заказы видны сразу после оформления.
 
 ## Возможности
 
+- **Drupal Commerce (основная интеграция)**: уведомление отправляется в
+  момент размещения заказа — переход в статус «Завершён» при оформлении
+  (событие `ORDER_PLACE`).
+- **Webform (опционально)**: если установлен модуль Webform, можно включить
+  доставку заявок выбранных форм — всё в тот же чат.
 - **Страница настроек в админке** — Конфигурация → Система →
-  «Telegram-уведомления о заявках» (`/admin/config/system/telegram-notify`):
+  «Telegram-уведомления: заказы и заявки»
+  (`/admin/config/system/commerce-to-telegram`):
   - токен бота (сохранённое значение скрыто, пустое поле = не менять);
   - ID чата или группы;
   - формат сообщения: HTML или простой текст;
-  - список всех форм Webform с чекбоксами — какие формы доставлять;
-  - шаблон сообщения с кликабельным списком токенов;
-  - кнопка **«Отправить тестовое сообщение»** для мгновенной проверки бота и чата.
-- **Токены Webform + Token**: значения любых полей заявки, номер, название
-  формы, сайт, дата, пользователь — всё подставляется в шаблон.
-- **Формат HTML**: жирные названия полей, ссылки; при некорректной разметке
-  модуль автоматически повторяет отправку простым текстом — заявка дойдёт
-  в любом случае.
-- **Надёжность**: сбой Telegram никогда не прерывает сохранение заявки;
-  ошибки пишутся в журнал Drupal (dblog).
+  - шаблон сообщения о заказе и шаблон о заявке;
+  - чекбоксы форм Webform для доставки;
+  - кнопка **«Отправить тестовое сообщение»** для мгновенной проверки.
+- **Токены**: стандартные токены Commerce и Webform через модуль Token
+  **плюс дополнительные токены модуля**:
+  - `[commerce_order:items_table]` — все позиции заказа, по одной в строке
+    («2 × Товар — 2 400 руб.»);
+  - `[commerce_order:billing_address]` — платёжный адрес;
+  - `[commerce_order:shipping_address]` — адрес доставки (нужен Commerce Shipping).
+- **Формат HTML**: жирные заголовки, аккуратные переносы; при некорректной
+  разметке модуль автоматически повторяет отправку простым текстом —
+  уведомление дойдёт в любом случае.
+- **Надёжность**: сбой Telegram никогда не прерывает оформление заказа и
+  сохранение заявки; ошибки пишутся в журнал Drupal (dblog,
+  канал `commerce_to_telegram`).
 - **Лимит Telegram 4096 символов** соблюдается автоматически.
-- Черновики и тестовые отправки Webform в Telegram не дублируются.
 
 ## Требования
 
-| Компонент | Версия |
-|---|---|
-| Drupal | ^10 \|\| ^11 |
-| PHP | >= 8.1 |
-| [Webform](https://www.drupal.org/project/webform) | ^6.0 |
-| [Token](https://www.drupal.org/project/token) | ^1.0 |
+| Компонент | Версия | Обязательность |
+|---|---|---|
+| Drupal | ^10 \|\| ^11 | да |
+| PHP | >= 8.1 | да |
+| [Drupal Commerce](https://www.drupal.org/project/commerce) | ^2.0 | да (устанавливается Composer'ом) |
+| [Token](https://www.drupal.org/project/token) | ^1.0 | да (устанавливается Composer'ом) |
+| [Webform](https://www.drupal.org/project/webform) | ^6.0 | опционально |
+
+Интеграции включаются автоматически по факту наличия модулей: если Commerce
+не установлен, раздел «Заказы» в админке скрыт; если не установлен Webform —
+скрыт раздел форм.
 
 ## Установка
 
@@ -51,33 +67,34 @@ Webform в Telegram** — в группу или канал, в которой(�
 
 ```bash
 # 1. Подключить репозиторий в composer.json проекта
-composer config repositories.webform-telegram-notifier vcs https://github.com/Mmitekk/drupal-commerce-to-telegram
+composer config repositories.commerce-to-telegram vcs https://github.com/Mmitekk/drupal-commerce-to-telegram
 
-# 2. Установить модуль (станет доступен в web/modules/custom/)
-composer require drupal/webform_telegram_notifier:^1.0
+# 2. Установить модуль последней версии (станет доступен в web/modules/custom/)
+composer require drupal/commerce_to_telegram
 
 # 3. Включить модуль
-drush en webform_telegram_notifier -y
+drush en commerce_to_telegram -y
 ```
 
+Без указания версии Composer поставит **последний стабильный релиз**.
 Никаких токенов доступа и регистрации на Packagist не требуется —
 репозиторий публичный, Composer забирает пакет напрямую с GitHub.
 
+> Чтобы команда `composer require drupal/commerce_to_telegram` работала
+> совсем «классически» (без подключения репозитория), можно один раз
+> зарегистрировать пакет на [packagist.org](https://packagist.org):
+> Submit → вставить URL этого репозитория. После этого репозиторий в
+> composer.json подключать уже не нужно.
+
 ### Вручную
 
-1. Скачайте архив: **Code → Download ZIP** (или со страницы
-   [Releases](../../releases)).
-2. Распакуйте в `web/modules/custom/` и **переименуйте папку** в
-   `webform_telegram_notifier` (важно — машинное имя модуля должно совпадать
-   с именем каталога).
+1. Скачайте архив: **Code → Download ZIP** или файл
+   `commerce_to_telegram-1.0.0.zip` со страницы
+   [Releases](../../releases).
+2. Распакуйте в `web/modules/custom/` так, чтобы получился путь
+   `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
 3. Очистите кеш (`drush cr` или `/admin/config/development/performance`).
 4. Включите модуль: **Управление → Расширение** (`/admin/modules`).
-
-### Через Drush (после ручной установки)
-
-```bash
-drush en webform_telegram_notifier -y
-```
 
 ## Настройка
 
@@ -101,66 +118,74 @@ drush en webform_telegram_notifier -y
 
 ### 3. Настройка модуля
 
-Откройте **Конфигурация → Система → Telegram-уведомления о заявках**:
+Откройте **Конфигурация → Система → Telegram-уведомления: заказы и заявки**:
 
 1. Вставьте **токен бота**.
 2. Укажите **ID чата/группы**.
 3. Выберите **формат** (HTML по умолчанию).
-4. Отметьте **формы** для отправки.
-5. При необходимости измените **шаблон сообщения**.
-6. Нажмите **«Отправить тестовое сообщение»** — тест придёт в группу, если
+4. В разделе **«Заказы Drupal Commerce»** включите отправку и при
+   необходимости измените шаблон.
+5. Нажмите **«Отправить тестовое сообщение»** — тест придёт в группу, если
    всё настроено верно.
-7. Сохраните настройки.
+6. Сохраните настройки.
 
 ## Как это работает
 
 ```mermaid
 flowchart LR
-    A["Пользователь отправляет форму Webform"] --> B["Заявка сохраняется на сайте"]
-    B --> C["hook_webform_submission_insert"]
-    C --> D{"Форма включена<br>в настройках?"}
-    D -- "нет / черновик / тест" --> E["Выход — ничего не отправляется"]
-    D -- "да" --> F["Подстановка токенов в шаблон"]
+    A["Покупатель оформляет заказ в чекауте"] --> B["Заказ переходит в статус «Завершён»"]
+    B --> C["Событие ORDER_PLACE"]
+    C --> D{"Интеграция Commerce<br>включена?"}
+    D -- "нет" --> E["Выход"]
+    D -- "да" --> F["Подстановка токенов в шаблон<br>(позиции, суммы, адрес)"]
     F --> G["Telegram Bot API: sendMessage"]
     G -- "ошибка разбора HTML" --> H["Повтор простым текстом"]
     G -- "успех" --> I["Сообщение в группе"]
 ```
 
-1. Пользователь отправляет форму Webform — заявка сохраняется штатно.
-2. На событии создания заявки (`hook_webform_submission_insert`) модуль
-   проверяет, включена ли форма в настройках. Черновики и тестовые
-   отправки пропускаются.
-3. Токены шаблона заменяются данными заявки (сервис Token + токены Webform).
+1. Покупатель завершает чекаут — заказ переходит в статус «Завершён».
+2. Модуль перехватывает событие размещения заказа (`ORDER_PLACE`).
+3. Токены шаблона заменяются данными заказа; список позиций и адреса
+   формируются встроенными токенами модуля.
 4. Сообщение отправляется через Telegram Bot API
    (`https://api.telegram.org/bot…/sendMessage`) в настроенный чат.
 5. Если Telegram отклонил HTML-разметку — отправка повторяется простым
    текстом. Лимит 4096 символов соблюдается.
-6. Любая ошибка сети или API **не прерывает сохранение заявки** — она
+6. Любая ошибка сети или API **не прерывает оформление заказа** — она
    записывается в журнал: **Отчёты → Последние сообщения журнала**
-   (`/admin/reports/dblog`), канал `webform_telegram_notifier`.
+   (`/admin/reports/dblog`), канал `commerce_to_telegram`.
 
 Весь обмен происходит синхронно с таймаутами 10 с (запрос) и 5 с
-(подключение), поэтому страница формы не «зависает» надолго даже при
-недоступном Telegram.
+(подключение). Заявки Webform обрабатываются аналогично — на событии
+создания заявки (`hook_webform_submission_insert`); черновики и тестовые
+отправки не дублируются.
 
-## Токены шаблона
+## Токены шаблона заказа
 
 | Токен | Что подставляет |
 |---|---|
-| `[webform_submission:values]` | Все заполненные поля заявки («Название: значение») |
+| `[commerce_order:order_number]` | Номер заказа |
+| `[commerce_order:items_table]` | Все позиции: «кол-во × название — сумма» |
+| `[commerce_order:total_price]` | Итоговая сумма с валютой |
+| `[commerce_order:mail]` | E-mail покупателя из заказа |
+| `[commerce_order:state]` | Статус заказа |
+| `[commerce_order:billing_address]` | Платёжный адрес |
+| `[commerce_order:shipping_address]` | Адрес доставки (Commerce Shipping) |
+| `[site:name]` | Название сайта |
+| `[current-date:medium]` | Дата/время |
+
+Также доступны стандартные токены Commerce (`[commerce_order:…]`,
+`[commerce_store:…]`) и глобальные токены Token-модуля — полный список
+открывается по ссылке «Просмотр доступных токенов» под полем шаблона.
+
+### Токены шаблона заявки (Webform)
+
+| Токен | Что подставляет |
+|---|---|
+| `[webform_submission:values]` | Все заполненные поля заявки |
 | `[webform_submission:values:telefon]` | Значение конкретного поля (машинное имя элемента) |
 | `[webform_submission:sid]` | Номер заявки |
 | `[webform_submission:webform:title]` | Название формы |
-| `[webform_submission:created]` | Дата создания заявки |
-| `[webform_submission:url]` | Ссылка на просмотр заявки |
-| `[site:name]` | Название сайта |
-| `[current-date:medium]` | Текущая дата/время |
-| `[current-user:name]` | Пользователь, отправивший заявку |
-
-Машинное имя элемента смотрите на вкладке **«Элементы»** формы
-(«Структура → Формы Webform → ваша форма → Элементы → Редактировать →
-Машинное имя»). Полный список токенов — по ссылке «Просмотр доступных
-токенов» под полем шаблона.
 
 ### Разрешённые HTML-теги Telegram
 
@@ -178,32 +203,34 @@ flowchart LR
 | `Bad Request: can't parse entities` | Ошибка HTML-разметки (модуль сам повторит простым текстом) |
 | `Too Many Requests` | Превышен лимит Telegram — кратковременно повторите позже |
 
-Все ошибки также фиксируются в журнале Drupal с указанием номера заявки.
+Все ошибки также фиксируются в журнале Drupal с указанием номера заказа
+или заявки.
 
 ## Безопасность
 
-- Доступ к настройкам — только с правом `administer webform telegram
-  notifier` (по умолчанию только администраторы).
+- Доступ к настройкам — только с правом `administer commerce to telegram`
+  (по умолчанию только администраторы).
 - Токен бота хранится в конфигурации сайта и **не выводится** на странице
   настроек: чтобы оставить прежний токен, оставьте поле пустым.
 - При выгрузке конфигурации (`drush cex`) токен попадает в файлы экспорта —
-  не публикуйте их и не коммитьте в публичные репозитории.
+  не публикуйте и не коммитьте их в публичные репозитории.
 
 ## Структура модуля
 
 ```
-webform_telegram_notifier/
-├── composer.json                               — пакет Composer (drupal-custom-module)
-├── webform_telegram_notifier.info.yml          — описание и зависимости
-├── webform_telegram_notifier.module            — хук интеграции с Webform
-├── webform_telegram_notifier.services.yml      — сервис отправки
-├── webform_telegram_notifier.routing.yml       — маршрут страницы настроек
-├── webform_telegram_notifier.links.menu.yml    — пункт в меню конфигурации
-├── webform_telegram_notifier.permissions.yml   — право доступа
-├── config/install/webform_telegram_notifier.settings.yml — настройки по умолчанию
-├── config/schema/webform_telegram_notifier.schema.yml    — схема конфигурации
-├── src/Service/TelegramSender.php              — отправка в Telegram Bot API
-└── src/Form/SettingsForm.php                   — страница настроек
+commerce_to_telegram/
+├── composer.json                            — пакет Composer (drupal-custom-module)
+├── commerce_to_telegram.info.yml            — описание модуля
+├── commerce_to_telegram.module              — Webform-хук + токены заказа
+├── commerce_to_telegram.services.yml        — сервисы (отправка, подписчик событий)
+├── commerce_to_telegram.routing.yml         — маршрут страницы настроек
+├── commerce_to_telegram.links.menu.yml      — пункт в меню конфигурации
+├── commerce_to_telegram.permissions.yml     — право доступа
+├── config/install/commerce_to_telegram.settings.yml — настройки по умолчанию
+├── config/schema/commerce_to_telegram.schema.yml    — схема конфигурации
+├── src/Service/TelegramSender.php           — отправка в Telegram Bot API
+├── src/EventSubscriber/OrderEventSubscriber.php — событие размещения заказа
+└── src/Form/SettingsForm.php                — страница настроек
 ```
 
 ## Лицензия

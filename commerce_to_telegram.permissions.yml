@@ -1,0 +1,4 @@
+administer commerce to telegram:
+  title: 'Настройка Telegram-уведомлений'
+  description: 'Доступ к странице настройки бота, чата и шаблонов сообщений.'
+  restrict access: true

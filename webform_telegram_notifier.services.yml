@@ -1,8 +1,0 @@
-services:
-  webform_telegram_notifier.sender:
-    class: Drupal\webform_telegram_notifier\Service\TelegramSender
-    arguments:
-      - '@http_client'
-      - '@config.factory'
-      - '@token'
-      - '@logger.factory'

@@ -1,0 +1,6 @@
+commerce_to_telegram.settings:
+  title: 'Telegram-уведомления: заказы и заявки'
+  description: 'Токен бота, чат и шаблоны сообщений для отправки заказов Drupal Commerce и заявок Webform в Telegram.'
+  parent: system.admin_config_system
+  route_name: commerce_to_telegram.settings
+  weight: 10

@@ -1,0 +1,9 @@
+bot_token: ''
+chat_id: ''
+parse_mode: html
+commerce:
+  enabled: true
+  message: "<b>Новый заказ №[commerce_order:order_number]</b>\n\n[commerce_order:items_table]\n\nИтого: [commerce_order:total_price]\nПокупатель: [commerce_order:mail]\nАдрес: [commerce_order:billing_address]\n\n[site:name] | [current-date:medium]"
+webform:
+  enabled_forms: []
+  message: "<b>Новая заявка: [webform_submission:webform:title] №[webform_submission:sid]</b>\n\n[webform_submission:values]\n\n—\n[site:name] | [current-date:medium]"

@@ -1,0 +1,187 @@
+<?php
+
+/**
+ * @file
+ * Commerce to Telegram: отправка заказов Commerce и заявок Webform в Telegram.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Render\BubbleableMetadata;
+use Drupal\webform\WebformSubmissionInterface;
+
+/**
+ * Implements hook_help().
+ */
+function commerce_to_telegram_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    case 'help.page.commerce_to_telegram':
+      return '<p>' . t('Модуль отправляет новые заказы Drupal Commerce и заявки Webform в Telegram. Бот, чат и шаблоны сообщений настраиваются на странице <a href=":url">«Telegram-уведомления»</a>.', [
+        ':url' => '/admin/config/system/commerce-to-telegram',
+      ]) . '</p>';
+  }
+  return NULL;
+}
+
+/**
+ * Implements hook_webform_submission_insert().
+ *
+ * Срабатывает при создании новой заявки Webform (если модуль Webform
+ * установлен). Ошибка отправки в Telegram никогда не прерывает
+ * сохранение заявки.
+ */
+function commerce_to_telegram_webform_submission_insert(WebformSubmissionInterface $webform_submission): void {
+  try {
+    \Drupal::service('commerce_to_telegram.sender')->notifySubmission($webform_submission);
+  }
+  catch (\Throwable $e) {
+    \Drupal::logger('commerce_to_telegram')->error('Не удалось обработать заявку @sid для отправки в Telegram: @message', [
+      '@sid' => $webform_submission->id(),
+      '@message' => $e->getMessage(),
+    ]);
+  }
+}
+
+/**
+ * Implements hook_token_info().
+ *
+ * Добавляет вспомогательные токены для заказов Drupal Commerce.
+ */
+function commerce_to_telegram_token_info() {
+  if (!\Drupal::moduleHandler()->moduleExists('commerce_order')) {
+    return [];
+  }
+
+  $info['tokens']['commerce_order']['items_table'] = [
+    'name' => t('Список позиций заказа'),
+    'description' => t('Все позиции заказа, по одной в строке: количество × название — сумма.'),
+  ];
+  $info['tokens']['commerce_order']['billing_address'] = [
+    'name' => t('Платёжный адрес'),
+    'description' => t('Платёжный адрес заказа, если он указан.'),
+  ];
+  $info['tokens']['commerce_order']['shipping_address'] = [
+    'name' => t('Адрес доставки'),
+    'description' => t('Адрес доставки из первой посылки (если модуль Shipping установлен и посылка создана).'),
+  ];
+
+  return $info;
+}
+
+/**
+ * Implements hook_tokens().
+ */
+function commerce_to_telegram_tokens($type, $tokens, array $data, array $options, BubbleableMetadata $bubbleable_metadata) {
+  $replacements = [];
+
+  if ($type !== 'commerce_order' || empty($data['commerce_order'])) {
+    return $replacements;
+  }
+  if (!\Drupal::moduleHandler()->moduleExists('commerce_order')) {
+    return $replacements;
+  }
+
+  /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
+  $order = $data['commerce_order'];
+  $bubbleable_metadata->addCacheableDependency($order);
+
+  foreach ($tokens as $name => $original) {
+    switch ($name) {
+      case 'items_table':
+        $replacements[$original] = commerce_to_telegram_format_order_items($order);
+        break;
+
+      case 'billing_address':
+        $replacements[$original] = commerce_to_telegram_format_profile_address($order->getBillingProfile());
+        break;
+
+      case 'shipping_address':
+        $replacements[$original] = commerce_to_telegram_format_shipping_address($order);
+        break;
+    }
+  }
+
+  return $replacements;
+}
+
+/**
+ * Формирует список позиций заказа для сообщения.
+ *
+ * @param \Drupal\commerce_order\Entity\OrderInterface $order
+ *   Заказ.
+ *
+ * @return string
+ *   Строка вида «2 × Товар — 2 400 руб.» по одной позиции в строке.
+ */
+function commerce_to_telegram_format_order_items($order): string {
+  $lines = [];
+  foreach ($order->getItems() as $item) {
+    $quantity = (float) $item->getQuantity();
+    if (fmod($quantity, 1.0) === 0.0) {
+      $quantity_label = (string) (int) $quantity;
+    }
+    else {
+      $quantity_label = rtrim(rtrim(number_format($quantity, 2, '.', ''), '0'), '.');
+    }
+    $total = $item->getTotalPrice();
+    $lines[] = sprintf('%s × %s — %s', $quantity_label, $item->getTitle(), $total ? $total->toString() : '');
+  }
+  return implode("\n", $lines);
+}
+
+/**
+ * Форматирует адрес платёжного профиля заказа.
+ *
+ * @param \Drupal\profile\Entity\ProfileInterface|null $profile
+ *   Профиль.
+ *
+ * @return string
+ *   Адрес в несколько строк или пустая строка.
+ */
+function commerce_to_telegram_format_profile_address($profile): string {
+  if (!$profile || !$profile->hasField('address') || $profile->get('address')->isEmpty()) {
+    return '';
+  }
+  $address = $profile->get('address')->first();
+  if (!$address || !method_exists($address, 'getAddressLine1')) {
+    return '';
+  }
+
+  $lines = [];
+  $name = trim(($address->getFamilyName() ?? '') . ' ' . ($address->getGivenName() ?? ''));
+  if ($name !== '') {
+    $lines[] = $name;
+  }
+  $lines[] = implode(', ', array_filter([
+    trim($address->getPostalCode() ?? ''),
+    trim($address->getLocality() ?? ''),
+  ]));
+  $lines[] = implode(', ', array_filter([
+    trim($address->getAddressLine1() ?? ''),
+    trim($address->getAddressLine2() ?? ''),
+  ]));
+
+  return implode("\n", array_filter(array_map('trim', $lines)));
+}
+
+/**
+ * Форматирует адрес доставки из первой посылки заказа.
+ *
+ * @param \Drupal\commerce_order\Entity\OrderInterface $order
+ *   Заказ.
+ *
+ * @return string
+ *   Адрес в несколько строк или пустая строка.
+ */
+function commerce_to_telegram_format_shipping_address($order): string {
+  if (!$order->hasField('shipments') || $order->get('shipments')->isEmpty()) {
+    return '';
+  }
+  $shipment = $order->get('shipments')->first()?->entity;
+  if (!$shipment) {
+    return '';
+  }
+  $profile = $shipment->get('shipping_profile')->entity ?? NULL;
+  return commerce_to_telegram_format_profile_address($profile);
+}

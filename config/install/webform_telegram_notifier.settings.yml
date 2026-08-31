@@ -1,5 +1,0 @@
-bot_token: ''
-chat_id: ''
-parse_mode: html
-enabled_webforms: []
-message: "<b>Новая заявка: [webform_submission:webform:title] №[webform_submission:sid]</b>\n\n[webform_submission:values]\n\n—\n[site:name] | [current-date:medium]"

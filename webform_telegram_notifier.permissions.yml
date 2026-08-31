@@ -1,4 +1,0 @@
-administer webform telegram notifier:
-  title: 'Настройка Telegram-уведомлений о заявках'
-  description: 'Доступ к странице настройки бота, чата и шаблона сообщения.'
-  restrict access: true

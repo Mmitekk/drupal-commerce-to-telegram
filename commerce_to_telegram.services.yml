@@ -1,0 +1,17 @@
+services:
+  commerce_to_telegram.sender:
+    class: Drupal\commerce_to_telegram\Service\TelegramSender
+    arguments:
+      - '@http_client'
+      - '@config.factory'
+      - '@token'
+      - '@logger.factory'
+      - '@module_handler'
+
+  commerce_to_telegram.order_subscriber:
+    class: Drupal\commerce_to_telegram\EventSubscriber\OrderEventSubscriber
+    arguments:
+      - '@commerce_to_telegram.sender'
+      - '@logger.factory'
+    tags:
+      - { name: event_subscriber }

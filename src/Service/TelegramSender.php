@@ -2,27 +2,29 @@
 
 /**
  * @file
- * Сервис отправки сообщений в Telegram для заявок Webform.
+ * Сервис отправки сообщений в Telegram (заказы Commerce и заявки Webform).
  */
 
 declare(strict_types=1);
 
-namespace Drupal\webform_telegram_notifier\Service;
+namespace Drupal\commerce_to_telegram\Service;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Utility\Token;
+use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\webform\WebformSubmissionInterface;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\RequestException;
 
 /**
- * Отправка заявок Webform в Telegram через Bot API.
+ * Отправка уведомлений в Telegram через Bot API.
  */
 class TelegramSender {
 
-  const CONFIG_NAME = 'webform_telegram_notifier.settings';
-  const LOGGER_CHANNEL = 'webform_telegram_notifier';
+  const CONFIG_NAME = 'commerce_to_telegram.settings';
+  const LOGGER_CHANNEL = 'commerce_to_telegram';
   const TELEGRAM_API = 'https://api.telegram.org';
   const MAX_LENGTH = 4096;
 
@@ -47,17 +49,78 @@ class TelegramSender {
   protected LoggerChannelFactoryInterface $loggerFactory;
 
   /**
+   * Обработчик модулей.
+   */
+  protected ModuleHandlerInterface $moduleHandler;
+
+  /**
    * Конструктор.
    */
-  public function __construct(ClientInterface $http_client, ConfigFactoryInterface $config_factory, Token $token, LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(ClientInterface $http_client, ConfigFactoryInterface $config_factory, Token $token, LoggerChannelFactoryInterface $logger_factory, ModuleHandlerInterface $module_handler) {
     $this->httpClient = $http_client;
     $this->configFactory = $config_factory;
     $this->token = $token;
     $this->loggerFactory = $logger_factory;
+    $this->moduleHandler = $module_handler;
   }
 
   /**
-   * Отправляет уведомление о новой заявке (если форма включена в настройках).
+   * Отправляет уведомление о новом заказе Drupal Commerce.
+   *
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   Заказ.
+   *
+   * @return bool
+   *   TRUE, если сообщение доставлено в Telegram.
+   */
+  public function notifyOrder(OrderInterface $order): bool {
+    $config = $this->configFactory->get(self::CONFIG_NAME);
+    if (!(bool) $config->get('commerce.enabled')) {
+      return FALSE;
+    }
+
+    [$bot_token, $chat_id] = $this->getCredentials();
+    if ($bot_token === '' || $chat_id === '') {
+      $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление о заказе @oid пропущено: не задан токен бота или ID чата. Укажите их на странице /admin/config/system/commerce-to-telegram.', [
+        '@oid' => $order->id(),
+      ]);
+      return FALSE;
+    }
+
+    $template = trim((string) $config->get('commerce.message'));
+    if ($template === '') {
+      $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление о заказе @oid пропущено: шаблон сообщения пуст.', [
+        '@oid' => $order->id(),
+      ]);
+      return FALSE;
+    }
+
+    $message = $this->replaceTokens($template, [
+      'commerce_order' => $order,
+      'user' => $order->getCustomer(),
+    ]);
+    if (trim(strip_tags($message)) === '') {
+      $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление о заказе @oid пропущено: после подстановки токенов сообщение пусто.', [
+        '@oid' => $order->id(),
+      ]);
+      return FALSE;
+    }
+
+    $parse_mode = $config->get('parse_mode') === 'plain' ? NULL : 'HTML';
+    $result = $this->send($bot_token, $chat_id, $message, $parse_mode);
+
+    if (!$result['ok']) {
+      $this->loggerFactory->get(self::LOGGER_CHANNEL)->error('Ошибка отправки заказа @oid в Telegram: @description', [
+        '@oid' => $order->id(),
+        '@description' => $result['description'],
+      ]);
+    }
+
+    return $result['ok'];
+  }
+
+  /**
+   * Отправляет уведомление о новой заявке Webform (если форма включена).
    *
    * @param \Drupal\webform\WebformSubmissionInterface $webform_submission
    *   Заявка Webform.
@@ -66,7 +129,9 @@ class TelegramSender {
    *   TRUE, если сообщение доставлено в Telegram.
    */
   public function notifySubmission(WebformSubmissionInterface $webform_submission): bool {
-    // Черновики и тестовые отправки не уведомляем.
+    if (!$this->moduleHandler->moduleExists('webform')) {
+      return FALSE;
+    }
     if ($webform_submission->isDraft()) {
       return FALSE;
     }
@@ -75,30 +140,30 @@ class TelegramSender {
     }
 
     $config = $this->configFactory->get(self::CONFIG_NAME);
-    $bot_token = trim((string) $config->get('bot_token'));
-    $chat_id = trim((string) $config->get('chat_id'));
-    if ($bot_token === '' || $chat_id === '') {
-      $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление пропущено: не задан токен бота или ID чата. Укажите их на странице /admin/config/system/telegram-notify.');
-      return FALSE;
-    }
 
+    $enabled = array_values(array_filter((array) $config->get('webform.enabled_forms')));
     $webform = $webform_submission->getWebform();
-    if (!$webform) {
+    if (!$webform || !in_array($webform->id(), $enabled, TRUE)) {
       return FALSE;
     }
 
-    $enabled = array_values(array_filter((array) $config->get('enabled_webforms')));
-    if (!in_array($webform->id(), $enabled, TRUE)) {
+    [$bot_token, $chat_id] = $this->getCredentials();
+    if ($bot_token === '' || $chat_id === '') {
+      $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление пропущено: не задан токен бота или ID чата. Укажите их на странице /admin/config/system/commerce-to-telegram.');
       return FALSE;
     }
 
-    $template = (string) $config->get('message');
-    if (trim($template) === '') {
+    $template = trim((string) $config->get('webform.message'));
+    if ($template === '') {
       $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление пропущено: шаблон сообщения пуст.');
       return FALSE;
     }
 
-    $message = $this->replaceTokens($template, $webform_submission);
+    $message = $this->replaceTokens($template, [
+      'webform_submission' => $webform_submission,
+      'node' => $webform_submission->getSourceEntity(),
+      'user' => $webform_submission->getOwner(),
+    ]);
     if (trim(strip_tags($message)) === '') {
       $this->loggerFactory->get(self::LOGGER_CHANNEL)->warning('Telegram-уведомление пропущено: после подстановки токенов сообщение пусто (заявка @sid).', [
         '@sid' => $webform_submission->id(),
@@ -120,25 +185,33 @@ class TelegramSender {
   }
 
   /**
-   * Подставляет токены в шаблон для конкретной заявки.
+   * Возвращает сохранённые учётные данные бота [токен, chat_id].
+   */
+  protected function getCredentials(): array {
+    $config = $this->configFactory->get(self::CONFIG_NAME);
+    return [
+      trim((string) $config->get('bot_token')),
+      trim((string) $config->get('chat_id')),
+    ];
+  }
+
+  /**
+   * Подставляет токены в шаблон.
    *
-   * Поддерживаются все токены Webform ([webform_submission:values:ключ]),
-   * а также глобальные токены Token-модуля ([site:name], [current-date:*] и т.д.).
+   * Поддерживаются все токены соответствующих сущностей
+   * ([commerce_order:…], [webform_submission:…]) и глобальные токены
+   * Token-модуля ([site:name], [current-date:*] и т.д.), включая
+   * дополнительные токены самого модуля ([commerce_order:items_table] и др.).
    *
    * @param string $text
    *   Текст шаблона.
-   * @param \Drupal\webform\WebformSubmissionInterface $webform_submission
-   *   Заявка.
+   * @param array $data
+   *   Данные для подстановки.
    *
    * @return string
    *   Готовый текст сообщения.
    */
-  public function replaceTokens(string $text, WebformSubmissionInterface $webform_submission): string {
-    $data = [
-      'webform_submission' => $webform_submission,
-      'node' => $webform_submission->getSourceEntity(),
-      'user' => $webform_submission->getOwner(),
-    ];
+  public function replaceTokens(string $text, array $data): string {
     $message = $this->token->replace($text, $data, ['clear' => TRUE]);
 
     // Telegram не поддерживает тег <br>: заменяем его на перевод строки.
@@ -175,7 +248,7 @@ class TelegramSender {
     $result = $this->doRequest($bot_token, $params);
 
     // Если разметка некорректна — повторяем отправку простым текстом,
-    // чтобы заявка всё равно дошла до группы.
+    // чтобы уведомление всё равно дошло до группы.
     if (!$result['ok'] && isset($params['parse_mode']) && $this->isParseError($result['description'])) {
       unset($params['parse_mode']);
       $result = $this->doRequest($bot_token, $params);
