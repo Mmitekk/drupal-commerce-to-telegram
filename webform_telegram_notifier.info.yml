@@ -1,0 +1,9 @@
+name: Webform Telegram Notifier
+type: module
+description: 'Отправка новых заявок Webform в Telegram: бот, группа и шаблон сообщения с токенами.'
+package: Custom
+core_version_requirement: ^10 || ^11
+configure: webform_telegram_notifier.settings
+dependencies:
+  - webform:webform
+  - token:token

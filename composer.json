@@ -1,0 +1,24 @@
+{
+    "name": "drupal/webform_telegram_notifier",
+    "type": "drupal-custom-module",
+    "description": "Sends new Webform submissions to a Telegram group or channel via a bot, with configurable bot, chat and token-based message template.",
+    "homepage": "https://github.com/Mmitekk/drupal-commerce-to-telegram",
+    "license": "GPL-2.0-or-later",
+    "keywords": [
+        "drupal",
+        "telegram",
+        "webform",
+        "notifications",
+        "telegram-bot"
+    ],
+    "require": {
+        "php": ">=8.1",
+        "drupal/core": "^10 || ^11",
+        "drupal/webform": "^6.0",
+        "drupal/token": "^1.0"
+    },
+    "support": {
+        "issues": "https://github.com/Mmitekk/drupal-commerce-to-telegram/issues",
+        "source": "https://github.com/Mmitekk/drupal-commerce-to-telegram"
+    }
+}

@@ -1,0 +1,6 @@
+webform_telegram_notifier.settings:
+  title: 'Telegram-уведомления о заявках'
+  description: 'Токен бота, чат и шаблон сообщения для отправки заявок Webform в Telegram.'
+  parent: system.admin_config_system
+  route_name: webform_telegram_notifier.settings
+  weight: 10
