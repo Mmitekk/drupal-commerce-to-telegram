@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.2-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.3-brightgreen)](../../releases)
 
 **[English](README.en.md)** | Русский
 
@@ -33,6 +33,7 @@
   - формат сообщения: HTML или простой текст;
   - адрес Telegram API и прокси — если хостинг ограничивает доступ к Telegram
     (ошибка «cURL error 28»);
+  - прямое соединение по IP — если DNS хостинга не резолвит api.telegram.org;
   - шаблон сообщения о заказе и шаблон о заявке;
   - чекбоксы форм Webform для доставки;
   - кнопка **«Сохранить и отправить тестовое сообщение»** — сохраняет
@@ -93,7 +94,7 @@ drush en commerce_to_telegram -y
 ### Вручную
 
 1. Скачайте архив: **Code → Download ZIP** или файл
-   `commerce_to_telegram-1.0.2.zip` со страницы
+   `commerce_to_telegram-1.0.3.zip` со страницы
    [Releases](../../releases).
 2. Распакуйте в `web/modules/custom/` так, чтобы получился путь
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -234,18 +235,38 @@ Connection timed out` означает, что сервер хостинга в�
 установить соединение с Telegram. От токена и настроек модуля это не
 зависит — проблема на уровне сети хостинга. Порядок действий:
 
-1. **Обновитесь до v1.0.2** и повторите тест: модуль принудительно
+1. **Обновитесь до v1.0.3** и повторите тест: модуль принудительно
    соединяется по IPv4, что чинит серверы с неработающим IPv6 (частая
    причина именно таких таймаутов).
-2. **Обратитесь в поддержку хостинга** (готовый шаблон): «С сервера
+2. **Попробуйте прямое соединение по IP** — настройка
+   «Прямое соединение по IP»: укажите `149.154.167.220` (актуальный IP
+   api.telegram.org). Модуль будет ходить на этот IP напрямую, сохраняя
+   имя api.telegram.org в HTTPS — эквивалент
+   `curl --resolve api.telegram.org:443:149.154.167.220`. Помогает, когда
+   DNS хостинга не резолвит или подменяет имя Telegram, но сам IP
+   доступен. Диагностика по SSH:
+
+   ```bash
+   # обычный запрос — может падать по таймауту
+   curl -sS --max-time 10 https://api.telegram.org/
+
+   # тот же запрос напрямую через IP Telegram
+   curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/
+   ```
+
+   Если второй вариант отвечает, а первый — нет, проблема в DNS, и
+   привязка к IP её решит. Актуальный IP можно узнать командой
+   `nslookup api.telegram.org 8.8.8.8` с любой машины со здоровым DNS;
+   если Telegram сменит IP — просто обновите значение в настройках.
+3. **Обратитесь в поддержку хостинга** (готовый шаблон): «С сервера
    хостинга недоступен api.telegram.org (TCP 443, подсеть
    149.154.160.0/20). При исходящем соединении из PHP/cURL получаю
    "Connection timed out". Прошу проверить и открыть исходящие
    соединения к api.telegram.org».
-3. **Укажите прокси** в настройках модуля — поле «Прокси для доступа
+4. **Укажите прокси** в настройках модуля — поле «Прокси для доступа
    к Telegram»: `http://хост:порт`, `https://хост:порт` или
    `socks5://логин:пароль@хост:порт`.
-4. **Свой бесплатный релей через Cloudflare Workers** (5 минут, тариф
+5. **Свой бесплатный релей через Cloudflare Workers** (5 минут, тариф
    Free подходит): cloudflare.com → Workers & Pages → Create Worker →
    вставьте код:
 
@@ -293,6 +314,14 @@ commerce_to_telegram/
 ```
 
 ## История версий
+
+### v1.0.3
+- **Прямое соединение по IP**: новая настройка — эквивалент
+  `curl --resolve api.telegram.org:443:149.154.167.220` (то же, что
+  `https.request()` с прямым IP в Node.js). Модуль идёт напрямую на
+  указанный IP, сохраняя имя api.telegram.org в TLS — обход
+  неработающего или подменённого DNS на хостинге, когда сам IP Telegram
+  с сервера доступен. Не применяется при заданном прокси.
 
 ### v1.0.2
 - **Поддержка хостингов без доступа к Telegram**: новая настройка

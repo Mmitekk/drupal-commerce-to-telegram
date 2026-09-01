@@ -143,6 +143,13 @@ class SettingsForm extends ConfigFormBase {
       '#description' => $this->t('Применяется, только если заполнено. Форматы: http://хост:порт, https://хост:порт или socks5://логин:пароль@хост:порт. Альтернатива прокси — релей в поле «Адрес Telegram API».'),
     ];
 
+    $form['telegram']['resolve_ip'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Прямое соединение по IP (опционально)'),
+      '#default_value' => $config->get('resolve_ip'),
+      '#description' => $this->t('Если DNS сервера не резолвит api.telegram.org или подменяет его адрес, укажите реальный IP Telegram API — например, 149.154.167.220. Модуль будет соединяться напрямую с этим IP, сохраняя имя api.telegram.org в HTTPS (аналог curl --resolve). Проверка по SSH: curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/ — если команда отвечает, а без --resolve нет, значит DNS на хостинге сломан, и эта настройка решит проблему. Актуальный IP: nslookup api.telegram.org 8.8.8.8. Не применяется, если задан прокси.'),
+    ];
+
     // --- Заказы Drupal Commerce ----------------------------------------------
     $form['commerce'] = [
       '#type' => 'details',
@@ -297,6 +304,11 @@ class SettingsForm extends ConfigFormBase {
       $form_state->setErrorByName('telegram][proxy', $this->t('Адрес прокси должен начинаться с http://, https:// или socks5://.'));
     }
 
+    $resolve_ip = trim((string) ($values['telegram']['resolve_ip'] ?? ''));
+    if ($resolve_ip !== '' && filter_var($resolve_ip, FILTER_VALIDATE_IP) === FALSE) {
+      $form_state->setErrorByName('telegram][resolve_ip', $this->t('Прямое соединение по IP: укажите корректный IP-адрес, например 149.154.167.220.'));
+    }
+
     $commerce_enabled = (bool) ($values['commerce']['commerce_enabled'] ?? FALSE);
     $commerce_message = trim((string) ($values['commerce']['commerce_message'] ?? ''));
     if ($commerce_enabled && $commerce_message === '') {
@@ -327,6 +339,7 @@ class SettingsForm extends ConfigFormBase {
       ->set('parse_mode', (string) ($telegram['parse_mode'] ?? 'html'))
       ->set('api_url', rtrim(trim((string) ($telegram['api_url'] ?? '')), '/'))
       ->set('proxy', trim((string) ($telegram['proxy'] ?? '')))
+      ->set('resolve_ip', trim((string) ($telegram['resolve_ip'] ?? '')))
       ->set('commerce.enabled', (bool) ($commerce['commerce_enabled'] ?? FALSE))
       ->set('commerce.message', (string) ($commerce['commerce_message'] ?? ''))
       ->set('webform.enabled_forms', array_values(array_filter((array) ($webform_section['enabled_webforms'] ?? []))))

@@ -17,6 +17,9 @@ commerce_to_telegram.settings:
     proxy:
       type: string
       label: 'Proxy for Telegram API'
+    resolve_ip:
+      type: string
+      label: 'Direct IP for Telegram API'
     commerce:
       type: mapping
       label: 'Drupal Commerce integration'

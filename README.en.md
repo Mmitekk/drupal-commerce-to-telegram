@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.2-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.3-brightgreen)](../../releases)
 
 English | **[Русский](README.md)**
 
@@ -34,6 +34,8 @@ right after checkout.
   - message format: HTML or plain text;
   - Telegram API base URL and proxy — if the hosting restricts access to
     Telegram ("cURL error 28");
+  - direct connection by IP — if the hosting DNS cannot resolve
+    api.telegram.org;
   - order message template and submission message template;
   - checkboxes for the Webform forms to deliver;
   - **"Save and send test message"** button — saves the settings and
@@ -95,7 +97,7 @@ repository is public, Composer pulls the package straight from GitHub.
 ### Manually
 
 1. Download the archive: **Code → Download ZIP** or the
-   `commerce_to_telegram-1.0.2.zip` file from the
+   `commerce_to_telegram-1.0.3.zip` file from the
    [Releases](../../releases) page.
 2. Unpack it into `web/modules/custom/` so that the path becomes
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -239,17 +241,37 @@ connection to Telegram at all. It has nothing to do with the token or the
 module settings — it is a network-level problem on the hosting side.
 Steps:
 
-1. **Update to v1.0.2** and retry the test: the module now forces IPv4,
+1. **Update to v1.0.3** and retry the test: the module now forces IPv4,
    which fixes servers with broken IPv6 (a very common cause of such
    timeouts).
-2. **Contact the hosting support** (ready-made request): "api.telegram.org
+2. **Try a direct connection by IP** — the "Direct connection by IP"
+   setting: enter `149.154.167.220` (the current api.telegram.org IP).
+   The module will connect to this IP directly while keeping the
+   api.telegram.org name in HTTPS — equivalent to
+   `curl --resolve api.telegram.org:443:149.154.167.220`. It helps when
+   the hosting DNS cannot resolve or spoils the Telegram name while the
+   IP itself is reachable. SSH diagnostics:
+
+   ```bash
+   # plain request — may time out
+   curl -sS --max-time 10 https://api.telegram.org/
+
+   # the same request pinned to the Telegram IP
+   curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/
+   ```
+
+   If the second works and the first does not, the problem is in DNS and
+   IP pinning will fix it. Get the current IP with
+   `nslookup api.telegram.org 8.8.8.8` from any machine with healthy
+   DNS; if Telegram ever changes the IP, just update the setting.
+3. **Contact the hosting support** (ready-made request): "api.telegram.org
    (TCP 443, subnet 149.154.160.0/20) is unreachable from the hosting
    server. An outbound PHP/cURL connection gets 'Connection timed out'.
    Please check and allow outbound connections to api.telegram.org".
-3. **Set a proxy** in the module settings — the "Proxy for Telegram
+4. **Set a proxy** in the module settings — the "Proxy for Telegram
    access" field: `http://host:port`, `https://host:port` or
    `socks5://user:pass@host:port`.
-4. **Your own free relay via Cloudflare Workers** (5 minutes, the Free
+5. **Your own free relay via Cloudflare Workers** (5 minutes, the Free
    plan is enough): cloudflare.com → Workers & Pages → Create Worker →
    paste the code:
 
@@ -297,6 +319,14 @@ commerce_to_telegram/
 ```
 
 ## Changelog
+
+### v1.0.3
+- **Direct connection by IP**: a new setting equivalent to
+  `curl --resolve api.telegram.org:443:149.154.167.220` (same as
+  `https.request()` with a direct IP in Node.js). The module connects to
+  the specified IP while keeping the api.telegram.org name in TLS —
+  a workaround for broken or spoofed hosting DNS when the Telegram IP
+  itself is reachable from the server. Not applied when a proxy is set.
 
 ### v1.0.2
 - **Support for hostings without access to Telegram**: a new "Proxy for

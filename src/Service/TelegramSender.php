@@ -218,6 +218,17 @@ class TelegramSender {
   }
 
   /**
+   * Возвращает IP для прямого соединения с Telegram (или пустую строку).
+   *
+   * Аналог «curl --resolve api.telegram.org:443:IP» (в Node — https.request()
+   * с прямым IP): полезен, когда DNS хостинга не резолвит api.telegram.org
+   * или подменяет его адрес, а сам IP Telegram API с сервера доступен.
+   */
+  protected function getResolveIp(): string {
+    return trim((string) $this->configFactory->get(self::CONFIG_NAME)->get('resolve_ip'));
+  }
+
+  /**
    * Скрывает токен бота в тексте ошибки (чтобы он не попадал в журнал и UI).
    */
   protected function maskToken(string $text, string $bot_token): string {
@@ -306,8 +317,29 @@ class TelegramSender {
       // Ряд хостингов пытается соединяться с Telegram по неработающему
       // IPv6 и получает «Connection timed out» — принудительно используем
       // IPv4 (api.telegram.org всегда доступен по IPv4).
+      $curl_options = [];
       if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
-        $options['curl'] = [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4];
+        $curl_options[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
+      }
+
+      // Прямое соединение по IP — аналог «curl --resolve»: DNS-кэш libcurl
+      // получает запись «хост:443 → IP», при этом имя api.telegram.org
+      // сохраняется в HTTP-запросе и в проверке TLS-сертификата. Обход
+      // сломанного/подменённого DNS: имя не резолвится, но сам IP Telegram
+      // с сервера доступен. С прокси не сочетается — прокси сам резолвит имя.
+      if ($proxy === '') {
+        $resolve_ip = $this->getResolveIp();
+        $api_host = parse_url($this->getApiUrl(), PHP_URL_HOST);
+        if ($resolve_ip !== ''
+          && $api_host !== FALSE && $api_host !== NULL
+          && filter_var($resolve_ip, FILTER_VALIDATE_IP) !== FALSE
+          && defined('CURLOPT_RESOLVE')) {
+          $curl_options[CURLOPT_RESOLVE] = [$api_host . ':443:' . $resolve_ip];
+        }
+      }
+
+      if ($curl_options !== []) {
+        $options['curl'] = $curl_options;
       }
 
       $response = $this->httpClient->post($this->getApiUrl() . '/bot' . $bot_token . '/sendMessage', $options);
