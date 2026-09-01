@@ -196,6 +196,35 @@ class TelegramSender {
   }
 
   /**
+   * Возвращает базовый адрес Telegram API.
+   *
+   * По умолчанию — официальный https://api.telegram.org, но если хостинг
+   * не имеет прямого доступа к Telegram (cURL error 28), администратор
+   * может указать адрес собственного релея (например, Cloudflare Worker),
+   * пересылающего запросы на api.telegram.org.
+   */
+  protected function getApiUrl(): string {
+    $custom = rtrim(trim((string) $this->configFactory->get(self::CONFIG_NAME)->get('api_url')), '/');
+    return $custom !== '' ? $custom : self::TELEGRAM_API;
+  }
+
+  /**
+   * Возвращает адрес прокси для запросов к Telegram (или пустую строку).
+   *
+   * Поддерживаются форматы Guzzle: http://, https://, socks5:// и т.д.
+   */
+  protected function getProxy(): string {
+    return trim((string) $this->configFactory->get(self::CONFIG_NAME)->get('proxy'));
+  }
+
+  /**
+   * Скрывает токен бота в тексте ошибки (чтобы он не попадал в журнал и UI).
+   */
+  protected function maskToken(string $text, string $bot_token): string {
+    return $bot_token === '' ? $text : str_replace($bot_token, '•••', $text);
+  }
+
+  /**
    * Подставляет токены в шаблон.
    *
    * Поддерживаются все токены соответствующих сущностей
@@ -262,11 +291,26 @@ class TelegramSender {
    */
   protected function doRequest(string $bot_token, array $params): array {
     try {
-      $response = $this->httpClient->post(self::TELEGRAM_API . '/bot' . $bot_token . '/sendMessage', [
+      $options = [
         'form_params' => $params,
         'timeout' => 10,
         'connect_timeout' => 5,
-      ]);
+      ];
+
+      // Прокси — если хостинг не имеет прямого выхода к Telegram.
+      $proxy = $this->getProxy();
+      if ($proxy !== '') {
+        $options['proxy'] = $proxy;
+      }
+
+      // Ряд хостингов пытается соединяться с Telegram по неработающему
+      // IPv6 и получает «Connection timed out» — принудительно используем
+      // IPv4 (api.telegram.org всегда доступен по IPv4).
+      if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
+        $options['curl'] = [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4];
+      }
+
+      $response = $this->httpClient->post($this->getApiUrl() . '/bot' . $bot_token . '/sendMessage', $options);
       $data = json_decode((string) $response->getBody(), TRUE);
       if (is_array($data) && !empty($data['ok'])) {
         return ['ok' => TRUE, 'description' => ''];
@@ -284,10 +328,10 @@ class TelegramSender {
           $description = (string) $body['description'];
         }
       }
-      return ['ok' => FALSE, 'description' => $description];
+      return ['ok' => FALSE, 'description' => $this->maskToken($description, $bot_token)];
     }
     catch (\Exception $e) {
-      return ['ok' => FALSE, 'description' => $e->getMessage()];
+      return ['ok' => FALSE, 'description' => $this->maskToken($e->getMessage(), $bot_token)];
     }
   }
 

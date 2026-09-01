@@ -7,3 +7,5 @@ commerce:
 webform:
   enabled_forms: []
   message: "<b>Новая заявка: [webform_submission:webform:title] №[webform_submission:sid]</b>\n\n[webform_submission:values]\n\n—\n[site:name] | [current-date:medium]"
+api_url: ''
+proxy: ''

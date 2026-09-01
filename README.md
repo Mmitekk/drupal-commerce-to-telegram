@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.1-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.2-brightgreen)](../../releases)
 
 **[English](README.en.md)** | Русский
 
@@ -31,6 +31,8 @@
   - токен бота (сохранённое значение скрыто, пустое поле = не менять);
   - ID чата или группы;
   - формат сообщения: HTML или простой текст;
+  - адрес Telegram API и прокси — если хостинг ограничивает доступ к Telegram
+    (ошибка «cURL error 28»);
   - шаблон сообщения о заказе и шаблон о заявке;
   - чекбоксы форм Webform для доставки;
   - кнопка **«Сохранить и отправить тестовое сообщение»** — сохраняет
@@ -91,7 +93,7 @@ drush en commerce_to_telegram -y
 ### Вручную
 
 1. Скачайте архив: **Code → Download ZIP** или файл
-   `commerce_to_telegram-1.0.1.zip` со страницы
+   `commerce_to_telegram-1.0.2.zip` со страницы
    [Releases](../../releases).
 2. Распакуйте в `web/modules/custom/` так, чтобы получился путь
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -205,6 +207,7 @@ flowchart LR
 | `Forbidden: bot was kicked…` | Бота удалили из группы — добавьте снова |
 | `Bad Request: can't parse entities` | Ошибка HTML-разметки (модуль сам повторит простым текстом) |
 | `Too Many Requests` | Превышен лимит Telegram — кратковременно повторите позже |
+| `cURL error 28: Connection timed out` | Сервер хостинга не может соединиться с api.telegram.org — см. раздел ниже |
 
 Все ошибки также фиксируются в журнале Drupal с указанием номера заказа
 или заявки.
@@ -223,6 +226,44 @@ Commerce, а SMTP вашего хостинга/Яндекса отключён 
    **«Email the customer a receipt when an order is placed»** → Сохранить.
    Письма о заказах перестанут отправляться (и ошибок больше не будет),
    Telegram-уведомления продолжат приходить.
+
+### Если хостинг не открывает api.telegram.org (cURL error 28)
+
+Ошибка вида `cURL error 28: Failed to connect to api.telegram.org port 443:
+Connection timed out` означает, что сервер хостинга вообще не может
+установить соединение с Telegram. От токена и настроек модуля это не
+зависит — проблема на уровне сети хостинга. Порядок действий:
+
+1. **Обновитесь до v1.0.2** и повторите тест: модуль принудительно
+   соединяется по IPv4, что чинит серверы с неработающим IPv6 (частая
+   причина именно таких таймаутов).
+2. **Обратитесь в поддержку хостинга** (готовый шаблон): «С сервера
+   хостинга недоступен api.telegram.org (TCP 443, подсеть
+   149.154.160.0/20). При исходящем соединении из PHP/cURL получаю
+   "Connection timed out". Прошу проверить и открыть исходящие
+   соединения к api.telegram.org».
+3. **Укажите прокси** в настройках модуля — поле «Прокси для доступа
+   к Telegram»: `http://хост:порт`, `https://хост:порт` или
+   `socks5://логин:пароль@хост:порт`.
+4. **Свой бесплатный релей через Cloudflare Workers** (5 минут, тариф
+   Free подходит): cloudflare.com → Workers & Pages → Create Worker →
+   вставьте код:
+
+   ```js
+   export default {
+     async fetch(request) {
+       const url = new URL(request.url);
+       url.hostname = 'api.telegram.org';
+       return fetch(new Request(url, request));
+     },
+   };
+   ```
+
+   После Deploy скопируйте адрес воркера вида
+   `https://имя-воркера.аккаунт.workers.dev` и вставьте его в поле
+   **«Адрес Telegram API»** в настройках модуля — запросы пойдут через
+   Cloudflare на api.telegram.org, сквозь релей проходит и TLS, и токен
+   в составе пути (перехватить его по пути нельзя).
 
 ## Безопасность
 
@@ -252,6 +293,16 @@ commerce_to_telegram/
 ```
 
 ## История версий
+
+### v1.0.2
+- **Поддержка хостингов без доступа к Telegram**: новая настройка
+  «Прокси для доступа к Telegram» (`http://`, `https://`, `socks5://`) и
+  настройка «Адрес Telegram API» — можно указать свой релей (например,
+  бесплатный Cloudflare Worker) вместо недоступного api.telegram.org.
+  Инструкция — в разделе «Диагностика ошибок».
+- **Принудительный IPv4** для запросов к Telegram — устраняет
+  «cURL error 28: Connection timed out» на серверах с неработающим IPv6.
+- Токен бота маскируется в текстах ошибок (не попадает в интерфейс и журнал).
 
 ### v1.0.1
 - **Исправлено сохранение настроек**: значения полей внутри секций не

@@ -11,6 +11,12 @@ commerce_to_telegram.settings:
     parse_mode:
       type: string
       label: 'Parse mode'
+    api_url:
+      type: string
+      label: 'Telegram API base URL'
+    proxy:
+      type: string
+      label: 'Proxy for Telegram API'
     commerce:
       type: mapping
       label: 'Drupal Commerce integration'

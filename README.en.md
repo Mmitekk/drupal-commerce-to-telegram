@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.1-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.2-brightgreen)](../../releases)
 
 English | **[Русский](README.md)**
 
@@ -32,6 +32,8 @@ right after checkout.
   - bot token (stored value is hidden; leave the field empty to keep it);
   - chat or group ID;
   - message format: HTML or plain text;
+  - Telegram API base URL and proxy — if the hosting restricts access to
+    Telegram ("cURL error 28");
   - order message template and submission message template;
   - checkboxes for the Webform forms to deliver;
   - **"Save and send test message"** button — saves the settings and
@@ -93,7 +95,7 @@ repository is public, Composer pulls the package straight from GitHub.
 ### Manually
 
 1. Download the archive: **Code → Download ZIP** or the
-   `commerce_to_telegram-1.0.1.zip` file from the
+   `commerce_to_telegram-1.0.2.zip` file from the
    [Releases](../../releases) page.
 2. Unpack it into `web/modules/custom/` so that the path becomes
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -208,6 +210,7 @@ substitution are automatically converted to line breaks.
 | `Forbidden: bot was kicked…` | The bot was removed from the group — add it again |
 | `Bad Request: can't parse entities` | Invalid HTML markup (the module retries as plain text) |
 | `Too Many Requests` | Telegram rate limit hit — retry shortly |
+| `cURL error 28: Connection timed out` | The hosting server cannot reach api.telegram.org — see the section below |
 
 All errors are also recorded in the Drupal log with the order or
 submission ID.
@@ -227,6 +230,43 @@ unpaid. Options:
    **"Email the customer a receipt when an order is placed"** → Save.
    Receipt emails stop (and so do the errors), while Telegram notifications
    keep arriving.
+
+### If the hosting cannot reach api.telegram.org (cURL error 28)
+
+An error like `cURL error 28: Failed to connect to api.telegram.org port
+443: Connection timed out` means the hosting server cannot establish a
+connection to Telegram at all. It has nothing to do with the token or the
+module settings — it is a network-level problem on the hosting side.
+Steps:
+
+1. **Update to v1.0.2** and retry the test: the module now forces IPv4,
+   which fixes servers with broken IPv6 (a very common cause of such
+   timeouts).
+2. **Contact the hosting support** (ready-made request): "api.telegram.org
+   (TCP 443, subnet 149.154.160.0/20) is unreachable from the hosting
+   server. An outbound PHP/cURL connection gets 'Connection timed out'.
+   Please check and allow outbound connections to api.telegram.org".
+3. **Set a proxy** in the module settings — the "Proxy for Telegram
+   access" field: `http://host:port`, `https://host:port` or
+   `socks5://user:pass@host:port`.
+4. **Your own free relay via Cloudflare Workers** (5 minutes, the Free
+   plan is enough): cloudflare.com → Workers & Pages → Create Worker →
+   paste the code:
+
+   ```js
+   export default {
+     async fetch(request) {
+       const url = new URL(request.url);
+       url.hostname = 'api.telegram.org';
+       return fetch(new Request(url, request));
+     },
+   };
+   ```
+
+   After Deploy, copy the worker URL like
+   `https://worker-name.account.workers.dev` and paste it into the
+   **"Telegram API base URL"** field in the module settings — requests
+   will go through Cloudflare to api.telegram.org, end-to-end over TLS.
 
 ## Security
 
@@ -257,6 +297,17 @@ commerce_to_telegram/
 ```
 
 ## Changelog
+
+### v1.0.2
+- **Support for hostings without access to Telegram**: a new "Proxy for
+  Telegram access" setting (`http://`, `https://`, `socks5://`) and a
+  "Telegram API base URL" setting — you can point the module to your own
+  relay (e.g. a free Cloudflare Worker) instead of the unreachable
+  api.telegram.org. See the Troubleshooting section.
+- **Forced IPv4** for outgoing Telegram requests — fixes
+  "cURL error 28: Connection timed out" on servers with broken IPv6.
+- The bot token is now masked in Telegram error texts (never shown in the
+  UI or the log).
 
 ### v1.0.1
 - **Fixed settings not being saved**: field values inside sections never

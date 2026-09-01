@@ -127,6 +127,22 @@ class SettingsForm extends ConfigFormBase {
       ]),
     ];
 
+    // Если хостинг не имеет прямого выхода к Telegram (cURL error 28),
+    // администратор может указать свой релей или прокси.
+    $form['telegram']['api_url'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Адрес Telegram API'),
+      '#default_value' => $config->get('api_url') ?: 'https://api.telegram.org',
+      '#description' => $this->t('Обычно менять не нужно. Если соединение с api.telegram.org блокируется на стороне хостинга (ошибка «cURL error 28: Connection timed out»), укажите здесь адрес собственного релея — например, бесплатного Cloudflare Worker, пересылающего запросы на api.telegram.org. Инструкция — в README модуля, раздел «Если хостинг не открывает api.telegram.org».'),
+    ];
+
+    $form['telegram']['proxy'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Прокси для доступа к Telegram (опционально)'),
+      '#default_value' => $config->get('proxy'),
+      '#description' => $this->t('Применяется, только если заполнено. Форматы: http://хост:порт, https://хост:порт или socks5://логин:пароль@хост:порт. Альтернатива прокси — релей в поле «Адрес Telegram API».'),
+    ];
+
     // --- Заказы Drupal Commerce ----------------------------------------------
     $form['commerce'] = [
       '#type' => 'details',
@@ -270,6 +286,17 @@ class SettingsForm extends ConfigFormBase {
    */
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     $values = $form_state->getValues();
+
+    $api_url = trim((string) ($values['telegram']['api_url'] ?? ''));
+    if ($api_url !== '' && !preg_match('#^https?://#i', $api_url)) {
+      $form_state->setErrorByName('telegram][api_url', $this->t('Адрес Telegram API должен начинаться с http:// или https://.'));
+    }
+
+    $proxy = trim((string) ($values['telegram']['proxy'] ?? ''));
+    if ($proxy !== '' && !preg_match('#^(https?|socks[45]h?)://#i', $proxy)) {
+      $form_state->setErrorByName('telegram][proxy', $this->t('Адрес прокси должен начинаться с http://, https:// или socks5://.'));
+    }
+
     $commerce_enabled = (bool) ($values['commerce']['commerce_enabled'] ?? FALSE);
     $commerce_message = trim((string) ($values['commerce']['commerce_message'] ?? ''));
     if ($commerce_enabled && $commerce_message === '') {
@@ -298,6 +325,8 @@ class SettingsForm extends ConfigFormBase {
       ->set('bot_token', $bot_token !== '' ? $bot_token : $stored_token)
       ->set('chat_id', trim((string) ($telegram['chat_id'] ?? '')))
       ->set('parse_mode', (string) ($telegram['parse_mode'] ?? 'html'))
+      ->set('api_url', rtrim(trim((string) ($telegram['api_url'] ?? '')), '/'))
+      ->set('proxy', trim((string) ($telegram['proxy'] ?? '')))
       ->set('commerce.enabled', (bool) ($commerce['commerce_enabled'] ?? FALSE))
       ->set('commerce.message', (string) ($commerce['commerce_message'] ?? ''))
       ->set('webform.enabled_forms', array_values(array_filter((array) ($webform_section['enabled_webforms'] ?? []))))
