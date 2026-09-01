@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.3-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.4-brightgreen)](../../releases)
 
 English | **[Русский](README.md)**
 
@@ -97,7 +97,7 @@ repository is public, Composer pulls the package straight from GitHub.
 ### Manually
 
 1. Download the archive: **Code → Download ZIP** or the
-   `commerce_to_telegram-1.0.3.zip` file from the
+   `commerce_to_telegram-1.0.4.zip` file from the
    [Releases](../../releases) page.
 2. Unpack it into `web/modules/custom/` so that the path becomes
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -212,7 +212,7 @@ substitution are automatically converted to line breaks.
 | `Forbidden: bot was kicked…` | The bot was removed from the group — add it again |
 | `Bad Request: can't parse entities` | Invalid HTML markup (the module retries as plain text) |
 | `Too Many Requests` | Telegram rate limit hit — retry shortly |
-| `cURL error 28: Connection timed out` | The hosting server cannot reach api.telegram.org — see the section below |
+| `cURL error 28: Connection timed out` | The hosting server cannot reach api.telegram.org. Since v1.0.4 the module retries routes on its own (your IP → official Telegram IPs → DNS) and shows every attempt in the error text — see the section below |
 
 All errors are also recorded in the Drupal log with the order or
 submission ID.
@@ -239,18 +239,24 @@ An error like `cURL error 28: Failed to connect to api.telegram.org port
 443: Connection timed out` means the hosting server cannot establish a
 connection to Telegram at all. It has nothing to do with the token or the
 module settings — it is a network-level problem on the hosting side.
-Steps:
 
-1. **Update to v1.0.3** and retry the test: the module now forces IPv4,
-   which fixes servers with broken IPv6 (a very common cause of such
-   timeouts).
-2. **Try a direct connection by IP** — the "Direct connection by IP"
-   setting: enter `149.154.167.220` (the current api.telegram.org IP).
-   The module will connect to this IP directly while keeping the
-   api.telegram.org name in HTTPS — equivalent to
-   `curl --resolve api.telegram.org:443:149.154.167.220`. It helps when
-   the hosting DNS cannot resolve or spoils the Telegram name while the
-   IP itself is reachable. SSH diagnostics:
+**Since v1.0.4 the module retries routes automatically** on every send:
+
+1. the IP from the "Direct connection by IP" setting (if filled in);
+2. the official api.telegram.org IPs — `149.154.167.198`, `149.154.167.220`;
+3. a regular DNS lookup.
+
+The test-message error text now lists **every attempt in order** (route
+plus its connection error), and the Drupal log notes which fallback
+route delivered the message. What to do next:
+
+1. **Retry the test message** — if at least one route is reachable, the
+   module will deliver the notification on its own, with no extra
+   settings.
+2. **Make sure SSH checks run on the same server** (a common mistake is
+   running them on your other server with a different network). On the
+   site's server, `curl -sS --max-time 5 2ip.ru` must show its public
+   IP. Then compare reachability:
 
    ```bash
    # plain request — may time out
@@ -260,10 +266,12 @@ Steps:
    curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/
    ```
 
-   If the second works and the first does not, the problem is in DNS and
-   IP pinning will fix it. Get the current IP with
+   If the second works and the first does not, the hosting DNS is the
+   problem: put the working IP into the "Direct connection by IP"
+   setting (the module also tries both official IPs on its own). If a
+   different IP works, enter that one; get the current address with
    `nslookup api.telegram.org 8.8.8.8` from any machine with healthy
-   DNS; if Telegram ever changes the IP, just update the setting.
+   DNS.
 3. **Contact the hosting support** (ready-made request): "api.telegram.org
    (TCP 443, subnet 149.154.160.0/20) is unreachable from the hosting
    server. An outbound PHP/cURL connection gets 'Connection timed out'.
@@ -319,6 +327,20 @@ commerce_to_telegram/
 ```
 
 ## Changelog
+
+### v1.0.4
+- **Automatic route fallback to Telegram**: on every send the module
+  tries, in order, the IP from the "Direct connection by IP" setting,
+  the official api.telegram.org IPs (`149.154.167.198`,
+  `149.154.167.220`) and a regular DNS lookup — until one route works.
+  It is enough for at least one address to be reachable.
+- **Detailed diagnostics in the test-message error**: every attempt is
+  now listed in order (route + connection error text), plus a hint on
+  how to verify SSH commands run on the site's own server
+  (`curl -sS --max-time 5 2ip.ru`).
+- If Telegram answers over the network (e.g., `Unauthorized` with a bad
+  token), no route fallback happens — that is a settings issue, not a
+  connection one.
 
 ### v1.0.3
 - **Direct connection by IP**: a new setting equivalent to

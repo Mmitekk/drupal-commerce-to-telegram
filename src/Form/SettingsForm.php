@@ -147,7 +147,7 @@ class SettingsForm extends ConfigFormBase {
       '#type' => 'textfield',
       '#title' => $this->t('Прямое соединение по IP (опционально)'),
       '#default_value' => $config->get('resolve_ip'),
-      '#description' => $this->t('Если DNS сервера не резолвит api.telegram.org или подменяет его адрес, укажите реальный IP Telegram API — например, 149.154.167.220. Модуль будет соединяться напрямую с этим IP, сохраняя имя api.telegram.org в HTTPS (аналог curl --resolve). Проверка по SSH: curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/ — если команда отвечает, а без --resolve нет, значит DNS на хостинге сломан, и эта настройка решит проблему. Актуальный IP: nslookup api.telegram.org 8.8.8.8. Не применяется, если задан прокси.'),
+      '#description' => $this->t('Если DNS сервера не резолвит api.telegram.org или подменяет его адрес, укажите рабочий IP Telegram API — например, 149.154.167.220. Модуль соединится напрямую с этим IP, сохраняя имя api.telegram.org в HTTPS (аналог curl --resolve). Если указанный IP не ответит, модуль автоматически попробует официальные IP Telegram (149.154.167.198, 149.154.167.220), затем обычный DNS — в ошибке тестовой отправки видно все маршруты по очереди. Проверка по SSH — обязательно на сервере сайта (команда curl -sS --max-time 5 2ip.ru показывает публичный IP сервера): curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/. Не применяется, если задан прокси.'),
     ];
 
     // --- Заказы Drupal Commerce ----------------------------------------------

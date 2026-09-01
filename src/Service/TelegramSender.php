@@ -16,6 +16,7 @@ use Drupal\Core\Utility\Token;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\webform\WebformSubmissionInterface;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
 
 /**
@@ -27,6 +28,14 @@ class TelegramSender {
   const LOGGER_CHANNEL = 'commerce_to_telegram';
   const TELEGRAM_API = 'https://api.telegram.org';
   const MAX_LENGTH = 4096;
+
+  /**
+   * Официальные IP-адреса api.telegram.org (Telegram DC4, AS62041).
+   *
+   * Используются как запасные маршруты, когда DNS хостинга не резолвит
+   * имя api.telegram.org или подменяет его адрес.
+   */
+  const TELEGRAM_FALLBACK_IPS = ['149.154.167.198', '149.154.167.220'];
 
   /**
    * HTTP-клиент Guzzle.
@@ -298,58 +307,158 @@ class TelegramSender {
   }
 
   /**
-   * Выполняет HTTP-запрос к Telegram Bot API.
+   * Выполняет HTTP-запрос к Telegram Bot API с перебором маршрутов.
+   *
+   * Порядок попыток (для официального хоста api.telegram.org):
+   * 1. IP из настройки «Прямое соединение по IP» (если задан);
+   * 2. официальные IP Telegram (TELEGRAM_FALLBACK_IPS);
+   * 3. обычный DNS-запрос.
+   *
+   * Если Telegram ответил по сети (даже с ошибкой API — 401, 400 и т.п.),
+   * перебор прекращается: дальше помогают только настройки токена/чата,
+   * смена маршрута не нужна. Полная диагностика неудачных попыток
+   * попадает в текст ошибки (и в журнал), чтобы по тестовой кнопке было
+   * видно, какие именно маршруты пробовал модуль.
    */
   protected function doRequest(string $bot_token, array $params): array {
-    try {
-      $options = [
-        'form_params' => $params,
-        'timeout' => 10,
-        'connect_timeout' => 5,
-      ];
+    $attempts = $this->buildConnectionAttempts();
 
-      // Прокси — если хостинг не имеет прямого выхода к Telegram.
-      $proxy = $this->getProxy();
-      if ($proxy !== '') {
-        $options['proxy'] = $proxy;
+    $connection_errors = [];
+    foreach ($attempts as $index => $attempt) {
+      $result = $this->attemptRequest($bot_token, $params, $attempt, $index > 0);
+      if ($result['ok']) {
+        return $result;
       }
-
-      // Ряд хостингов пытается соединяться с Telegram по неработающему
-      // IPv6 и получает «Connection timed out» — принудительно используем
-      // IPv4 (api.telegram.org всегда доступен по IPv4).
-      $curl_options = [];
-      if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
-        $curl_options[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
+      if (empty($result['connect'])) {
+        // Telegram ответил по сети — это ошибка API, а не соединения.
+        return $result;
       }
+      $connection_errors[] = $attempt['label'] . ' — «' . $result['description'] . '»';
+    }
 
-      // Прямое соединение по IP — аналог «curl --resolve»: DNS-кэш libcurl
-      // получает запись «хост:443 → IP», при этом имя api.telegram.org
-      // сохраняется в HTTP-запросе и в проверке TLS-сертификата. Обход
-      // сломанного/подменённого DNS: имя не резолвится, но сам IP Telegram
-      // с сервера доступен. С прокси не сочетается — прокси сам резолвит имя.
-      if ($proxy === '') {
-        $resolve_ip = $this->getResolveIp();
-        $api_host = parse_url($this->getApiUrl(), PHP_URL_HOST);
-        if ($resolve_ip !== ''
-          && $api_host !== FALSE && $api_host !== NULL
-          && filter_var($resolve_ip, FILTER_VALIDATE_IP) !== FALSE
-          && defined('CURLOPT_RESOLVE')) {
-          $curl_options[CURLOPT_RESOLVE] = [$api_host . ':443:' . $resolve_ip];
+    $description = 'Не удалось соединиться с Telegram API. Пробовали: '
+      . implode('; ', $connection_errors)
+      . '. Убедитесь, что проверка curl выполняется именно на сервере сайта (команда curl -sS --max-time 5 2ip.ru должна показывать его публичный IP), и что сам сервер открывает api.telegram.org: curl -sS --max-time 10 https://api.telegram.org/ и curl -sS --max-time 10 --resolve api.telegram.org:443:149.154.167.220 https://api.telegram.org/. Если недоступен даже прямой IP — хостинг блокирует Telegram целиком: настройте прокси или «Адрес Telegram API» (релей), либо обратитесь в поддержку хостинга.';
+    return ['ok' => FALSE, 'description' => $this->maskToken($description, $bot_token)];
+  }
+
+  /**
+   * Возвращает список маршрутов отправки (в порядке приоритета).
+   *
+   * Пиннинг IP имеет смысл только для официального хоста Telegram API:
+   * свой релей в «Адрес Telegram API» должен резолвиться обычным образом.
+   * Прокси сам резолвит имя — с ним пиннинг не применяется вовсе.
+   */
+  protected function buildConnectionAttempts(): array {
+    if ($this->getProxy() !== '') {
+      return [['label' => 'через прокси', 'resolve_ip' => '']];
+    }
+
+    $api_host = parse_url($this->getApiUrl(), PHP_URL_HOST) ?: 'api.telegram.org';
+    $is_telegram_host = $api_host === 'api.telegram.org'
+      || (function_exists('str_ends_with') && str_ends_with($api_host, '.telegram.org'));
+
+    if (!$is_telegram_host) {
+      return [['label' => 'через DNS (' . $api_host . ')', 'resolve_ip' => '']];
+    }
+
+    $attempts = [];
+    $resolve_ip = $this->getResolveIp();
+    $has_pinned = $resolve_ip !== '' && filter_var($resolve_ip, FILTER_VALIDATE_IP) !== FALSE;
+
+    if ($has_pinned) {
+      // Сначала IP, указанный администратором...
+      $attempts[] = ['label' => 'напрямую через указанный IP ' . $resolve_ip, 'resolve_ip' => $resolve_ip];
+      // ...затем остальные официальные IP Telegram...
+      foreach (self::TELEGRAM_FALLBACK_IPS as $ip) {
+        if ($ip !== $resolve_ip) {
+          $attempts[] = ['label' => 'напрямую через IP ' . $ip, 'resolve_ip' => $ip];
         }
       }
-
-      if ($curl_options !== []) {
-        $options['curl'] = $curl_options;
+      // ...и только потом обычный DNS (обычно он и сломан).
+      $attempts[] = ['label' => 'через DNS (api.telegram.org)', 'resolve_ip' => ''];
+    }
+    else {
+      $attempts[] = ['label' => 'через DNS (api.telegram.org)', 'resolve_ip' => ''];
+      foreach (self::TELEGRAM_FALLBACK_IPS as $ip) {
+        $attempts[] = ['label' => 'напрямую через IP ' . $ip, 'resolve_ip' => $ip];
       }
+    }
 
+    return $attempts;
+  }
+
+  /**
+   * Одиночная попытка отправки с заданным маршрутом.
+   *
+   * @param array $attempt
+   *   Маршрут: label (для ошибок/журнала) и resolve_ip (или пустая строка).
+   * @param bool $fallback
+   *   TRUE, если это не первая попытка — при успехе пишем в журнал,
+   *   каким резервным маршрутом доставлено сообщение.
+   *
+   * @return array
+   *   ok (bool), description (string), connect (bool — ошибка соединения).
+   */
+  protected function attemptRequest(string $bot_token, array $params, array $attempt, bool $fallback): array {
+    $options = [
+      'form_params' => $params,
+      'timeout' => 10,
+      'connect_timeout' => 5,
+    ];
+
+    // Прокси — если хостинг не имеет прямого выхода к Telegram.
+    $proxy = $this->getProxy();
+    if ($proxy !== '') {
+      $options['proxy'] = $proxy;
+    }
+
+    // Ряд хостингов пытается соединяться с Telegram по неработающему
+    // IPv6 и получает «Connection timed out» — принудительно используем
+    // IPv4 (api.telegram.org всегда доступен по IPv4).
+    $curl_options = [];
+    if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
+      $curl_options[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
+    }
+
+    // Прямое соединение по IP — аналог «curl --resolve»: DNS-кэш libcurl
+    // получает запись «хост:443 → IP», при этом имя api.telegram.org
+    // сохраняется в HTTP-запросе и в проверке TLS-сертификата. Обход
+    // сломанного/подменённого DNS: имя не резолвится, но сам IP Telegram
+    // с сервера доступен. С прокси не сочетается — прокси сам резолвит имя.
+    if ($proxy === '' && !empty($attempt['resolve_ip'])) {
+      $api_host = parse_url($this->getApiUrl(), PHP_URL_HOST);
+      if ($api_host !== FALSE && $api_host !== NULL && defined('CURLOPT_RESOLVE')) {
+        $curl_options[CURLOPT_RESOLVE] = [$api_host . ':443:' . $attempt['resolve_ip']];
+      }
+    }
+
+    if ($curl_options !== []) {
+      $options['curl'] = $curl_options;
+    }
+
+    try {
       $response = $this->httpClient->post($this->getApiUrl() . '/bot' . $bot_token . '/sendMessage', $options);
       $data = json_decode((string) $response->getBody(), TRUE);
       if (is_array($data) && !empty($data['ok'])) {
-        return ['ok' => TRUE, 'description' => ''];
+        if ($fallback) {
+          $this->loggerFactory->get(self::LOGGER_CHANNEL)->info('Telegram: сообщение доставлено резервным маршрутом (@label).', [
+            '@label' => $attempt['label'],
+          ]);
+        }
+        return ['ok' => TRUE, 'description' => '', 'connect' => FALSE];
       }
       return [
         'ok' => FALSE,
         'description' => (string) ($data['description'] ?? 'Неизвестный ответ Telegram API.'),
+        'connect' => FALSE,
+      ];
+    }
+    catch (ConnectException $e) {
+      return [
+        'ok' => FALSE,
+        'description' => $this->maskToken($e->getMessage(), $bot_token),
+        'connect' => TRUE,
       ];
     }
     catch (RequestException $e) {
@@ -357,13 +466,26 @@ class TelegramSender {
       if ($response = $e->getResponse()) {
         $body = json_decode((string) $response->getBody(), TRUE);
         if (is_array($body) && !empty($body['description'])) {
-          $description = (string) $body['description'];
+          // Telegram ответил по HTTP — перебор маршрутов не нужен.
+          return [
+            'ok' => FALSE,
+            'description' => $this->maskToken($description, $bot_token),
+            'connect' => FALSE,
+          ];
         }
       }
-      return ['ok' => FALSE, 'description' => $this->maskToken($description, $bot_token)];
+      return [
+        'ok' => FALSE,
+        'description' => $this->maskToken($description, $bot_token),
+        'connect' => TRUE,
+      ];
     }
     catch (\Exception $e) {
-      return ['ok' => FALSE, 'description' => $this->maskToken($e->getMessage(), $bot_token)];
+      return [
+        'ok' => FALSE,
+        'description' => $this->maskToken($e->getMessage(), $bot_token),
+        'connect' => FALSE,
+      ];
     }
   }
 
