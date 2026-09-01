@@ -80,10 +80,14 @@ class SettingsForm extends ConfigFormBase {
     $stored_token = trim((string) $config->get('bot_token'));
 
     // --- Бот и чат ---------------------------------------------------------
+    // #tree = TRUE обязателен: без него значения детей не вкладываются
+    // в массив 'telegram', и getValue('telegram') возвращает NULL
+    // (настройки «не сохранялись» именно поэтому).
     $form['telegram'] = [
       '#type' => 'details',
       '#title' => $this->t('Бот и чат'),
       '#open' => TRUE,
+      '#tree' => TRUE,
     ];
 
     $form['telegram']['bot_token'] = [
@@ -114,7 +118,13 @@ class SettingsForm extends ConfigFormBase {
         'plain' => $this->t('Простой текст'),
       ],
       '#default_value' => $config->get('parse_mode') ?: 'html',
-      '#description' => $this->t('Для HTML поддерживаются теги: <b>, <i>, <u>, <s>, <a href="…">, <code>, <pre>. Если разметка окажется некорректной, модуль автоматически повторит отправку простым текстом, чтобы уведомление не потерялось.'),
+      // ВАЖНО: названия тегов передаются через @-плейсхолдер, который
+      // экранирует HTML. Раньше теги вставлялись в описание «как есть»,
+      // браузер считал их настоящими элементами: незакрытый <s> зачёркивал
+      // всю страницу ниже, <a> делал тексты ссылками и т.д.
+      '#description' => $this->t('Для HTML поддерживаются теги: @tags. Если разметка окажется некорректной, модуль автоматически повторит отправку простым текстом, чтобы уведомление не потерялось.', [
+        '@tags' => '<b>, <i>, <u>, <s>, <a>, <code>, <pre>',
+      ]),
     ];
 
     // --- Заказы Drupal Commerce ----------------------------------------------
@@ -122,6 +132,7 @@ class SettingsForm extends ConfigFormBase {
       '#type' => 'details',
       '#title' => $this->t('Заказы Drupal Commerce'),
       '#open' => TRUE,
+      '#tree' => TRUE,
     ];
 
     if (\Drupal::moduleHandler()->moduleExists('commerce_order')) {
@@ -140,10 +151,12 @@ class SettingsForm extends ConfigFormBase {
         '#description' => $this->t('Токены заказа: [commerce_order:order_number], [commerce_order:total_price], [commerce_order:mail], [commerce_order:state]. Дополнительные токены модуля: [commerce_order:items_table] (все позиции заказа), [commerce_order:billing_address], [commerce_order:shipping_address].'),
       ];
 
-      $form['commerce']['commerce_token_help'] = [
-        '#theme' => 'token_tree_link',
-        '#token_types' => ['commerce_order', 'site', 'user', 'current-user', 'current-date'],
-      ];
+      if (\Drupal::moduleHandler()->moduleExists('token')) {
+        $form['commerce']['commerce_token_help'] = [
+          '#theme' => 'token_tree_link',
+          '#token_types' => ['commerce_order', 'site', 'user', 'current-user', 'current-date'],
+        ];
+      }
     }
     else {
       $form['commerce']['commerce_missing'] = [
@@ -156,6 +169,7 @@ class SettingsForm extends ConfigFormBase {
       '#type' => 'details',
       '#title' => $this->t('Формы Webform (опционально)'),
       '#open' => FALSE,
+      '#tree' => TRUE,
     ];
 
     if (\Drupal::moduleHandler()->moduleExists('webform')) {
@@ -195,10 +209,12 @@ class SettingsForm extends ConfigFormBase {
         '#description' => $this->t('Значения полей подставляются по ключу элемента: [webform_submission:values:КЛЮЧ]. Токен [webform_submission:values] без ключа подставит все заполненные поля заявки.'),
       ];
 
-      $form['webform_section']['webform_token_help'] = [
-        '#theme' => 'token_tree_link',
-        '#token_types' => ['webform_submission', 'webform', 'site', 'user', 'current-user', 'current-date'],
-      ];
+      if (\Drupal::moduleHandler()->moduleExists('token')) {
+        $form['webform_section']['webform_token_help'] = [
+          '#theme' => 'token_tree_link',
+          '#token_types' => ['webform_submission', 'webform', 'site', 'user', 'current-user', 'current-date'],
+        ];
+      }
     }
     else {
       $form['webform_section']['webform_missing'] = [
@@ -207,17 +223,14 @@ class SettingsForm extends ConfigFormBase {
     }
 
     // --- Кнопка тестовой отправки -------------------------------------------
+    // Кнопка сначала СОХРАНЯЕТ настройки, затем отправляет тест —
+    // конфигурация и фактическая отправка всегда согласованы.
     $form['actions']['#type'] = 'actions';
     $form['actions']['send_test'] = [
       '#type' => 'submit',
       '#button_type' => 'secondary',
-      '#value' => $this->t('Отправить тестовое сообщение'),
-      '#submit' => ['::sendTest'],
-      '#limit_validation_errors' => [
-        ['telegram', 'bot_token'],
-        ['telegram', 'chat_id'],
-        ['telegram', 'parse_mode'],
-      ],
+      '#value' => $this->t('Сохранить и отправить тестовое сообщение'),
+      '#submit' => ['::submitForm', '::sendTest'],
     ];
 
     return parent::buildForm($form, $form_state);

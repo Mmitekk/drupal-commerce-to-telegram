@@ -3,7 +3,7 @@
 [![Drupal](https://img.shields.io/badge/Drupal-10%20%7C%2011-0678BE?logo=drupal&logoColor=white)](https://www.drupal.org)
 [![Drupal Commerce](https://img.shields.io/badge/Commerce-2.x-0678BE)](https://www.drupal.org/project/commerce)
 [![License](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-brightgreen)](../../releases)
+[![Release](https://img.shields.io/badge/Release-v1.0.1-brightgreen)](../../releases)
 
 English | **[Русский](README.md)**
 
@@ -22,7 +22,8 @@ right after checkout.
 
 - **Drupal Commerce (primary integration)**: a notification is sent the
   moment an order is placed — the transition to the "Completed" status at
-  checkout (the `ORDER_PLACE` event).
+  checkout (the `commerce_order.place.post_transition` event — the same one
+  Commerce itself uses for receipt emails).
 - **Webform (optional)**: if the Webform module is installed, you can
   deliver submissions of selected forms to the same chat.
 - **Admin settings page** — Configuration → System → "Telegram
@@ -33,7 +34,8 @@ right after checkout.
   - message format: HTML or plain text;
   - order message template and submission message template;
   - checkboxes for the Webform forms to deliver;
-  - **"Send test message"** button for instant validation.
+  - **"Save and send test message"** button — saves the settings and
+    instantly validates delivery.
 - **Tokens**: standard Commerce and Webform tokens via the Token module
   **plus extra tokens provided by this module**:
   - `[commerce_order:items_table]` — all order items, one per line
@@ -91,7 +93,7 @@ repository is public, Composer pulls the package straight from GitHub.
 ### Manually
 
 1. Download the archive: **Code → Download ZIP** or the
-   `commerce_to_telegram-1.0.0.zip` file from the
+   `commerce_to_telegram-1.0.1.zip` file from the
    [Releases](../../releases) page.
 2. Unpack it into `web/modules/custom/` so that the path becomes
    `web/modules/custom/commerce_to_telegram/commerce_to_telegram.info.yml`.
@@ -128,16 +130,16 @@ submissions**:
 3. Choose the **format** (HTML by default).
 4. In the **"Drupal Commerce orders"** section enable sending and adjust
    the template if needed.
-5. Click **"Send test message"** — a test will arrive in the group if
-   everything is configured correctly.
-6. Save the settings.
+5. Click **"Save and send test message"** — the settings are saved and a
+   test arrives in the group if everything is configured correctly (a
+   Telegram error is displayed on the page if not).
 
 ## How it works
 
 ```mermaid
 flowchart LR
     A["Customer completes checkout"] --> B["Order transitions to Completed"]
-    B --> C["ORDER_PLACE event"]
+    B --> C["place.post_transition event"]
     C --> D{"Commerce integration<br>enabled?"}
     D -- "no" --> E["Exit"]
     D -- "yes" --> F["Token replacement in template<br>(items, totals, address)"]
@@ -147,7 +149,8 @@ flowchart LR
 ```
 
 1. A customer completes checkout — the order transitions to "Completed".
-2. The module listens to the order placement event (`ORDER_PLACE`).
+2. The module listens to the order placement event
+   (`commerce_order.place.post_transition`).
 3. Template tokens are replaced with order data; the item list and
    addresses are produced by the module's built-in tokens.
 4. The message is sent via the Telegram Bot API
@@ -209,6 +212,22 @@ substitution are automatically converted to line breaks.
 All errors are also recorded in the Drupal log with the order or
 submission ID.
 
+### If checkout shows "Unable to send e-mail" errors
+
+This is not the Telegram module: Commerce itself tries to email the order
+receipt to the customer while your SMTP (hosting / Yandex) is disabled or
+unpaid. Options:
+
+1. **Fix the mail** (recommended): enable paid SMTP in Yandex 360 or connect
+   any SMTP provider via the
+   [PHPMailer SMTP](https://www.drupal.org/project/phpmailer_smtp) module.
+2. **Disable order receipt emails** with the built-in Commerce setting:
+   **Commerce → Configuration → Order types → Edit**
+   (`/admin/commerce/config/order-types/*/edit`) → untick
+   **"Email the customer a receipt when an order is placed"** → Save.
+   Receipt emails stop (and so do the errors), while Telegram notifications
+   keep arriving.
+
 ## Security
 
 - Settings access requires the `administer commerce to telegram`
@@ -236,6 +255,24 @@ commerce_to_telegram/
 ├── src/EventSubscriber/OrderEventSubscriber.php — order placement event
 └── src/Form/SettingsForm.php                — settings page
 ```
+
+## Changelog
+
+### v1.0.1
+- **Fixed settings not being saved**: field values inside sections never
+  reached `$form_state` (missing `#tree => TRUE`), so after saving the
+  token and chat ID fields appeared empty and notifications were never
+  sent.
+- **Fixed the order placement event**: the module referenced a
+  non-existent `CommerceOrderEvents::ORDER_PLACE` class; it now listens to
+  the real `commerce_order.place.post_transition` event (same as Commerce).
+- **Fixed admin page markup**: HTML tag names in the "Message format" hint
+  were injected as live markup — the browser struck through and linkified
+  all text below (the strikethroughs on the settings page).
+- The test button now saves the settings first, then sends the test.
+
+### v1.0.0
+- Initial release: Commerce order and Webform submission notifications.
 
 ## License
 
